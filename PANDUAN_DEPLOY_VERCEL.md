@@ -50,7 +50,7 @@ Jika Anda ingin proyek Anda tersimpan rapi di GitHub dan otomatis update setiap 
    git add .
    git commit -m "Excel2PDF Studio Web Ready for Vercel"
    git branch -M main
-   git remote add origin https://github.com/USERNAME_ANDA/excel-to-pdf-web.git
+   git remote add origin https://github.com/okta-s-009/excel-to-pdf-web.git
    git push -u origin main
    ```
 
