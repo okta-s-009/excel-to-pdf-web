@@ -2,7 +2,10 @@ import os
 import sys
 import time
 import uuid
-import pymupdf
+try:
+    import pymupdf
+except ImportError:
+    pymupdf = None
 import openpyxl
 from typing import Dict, Any, List, Optional
 
@@ -448,6 +451,8 @@ def generate_pdf_previews(pdf_path: str, output_dir: str, max_pages: int = 10) -
     Renders preview images of the PDF using PyMuPDF.
     """
     os.makedirs(output_dir, exist_ok=True)
+    if not pymupdf:
+        return {"total_pages": 1, "previews": []}
     doc = pymupdf.open(pdf_path)
     total_pages = len(doc)
     preview_files = []
