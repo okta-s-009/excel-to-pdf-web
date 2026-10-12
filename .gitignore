@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+env/
+venv/
+
+# Local storage and temporary files
+storage/uploads/*
+storage/outputs/*
+storage/previews/*
+!storage/uploads/.gitkeep
+!storage/outputs/.gitkeep
+!storage/previews/.gitkeep
+*.pdf
+!public/
+!static/
+
+# Vercel deployment cache
+.vercel
+
+# Android build cache (jika ada)
+.gradle/
+build/
+android/.gradle/
+android/app/build/
+android/local.properties
+node_modules/

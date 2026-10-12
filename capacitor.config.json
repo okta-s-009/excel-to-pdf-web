@@ -1,0 +1,9 @@
+{
+  "appId": "com.excel2pdf.studio",
+  "appName": "Excel2PDF Studio",
+  "webDir": "static",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

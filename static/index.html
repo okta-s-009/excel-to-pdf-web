@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel2PDF Studio - Konversi Excel ke PDF dengan Kontrol Margin Penuh</title>
+  <meta name="description" content="Aplikasi modern untuk mengubah file Excel (.xlsx, .xls) menjadi PDF dengan kontrol margin kustom (cm/inci), orientasi, skala muat halaman, dan pratinjau instan.">
+  
+  <!-- Mobile viewport & theme-color for Android -->
+  <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.json">
+  
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons (Offline Bundled) -->
+  <link rel="stylesheet" href="libs/fontawesome/all.min.css">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <!-- Background Glow & Grid Ornaments -->
+  <div class="bg-mesh" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-group">
+        <div class="brand-icon">
+          <i class="fa-solid fa-file-excel icon-excel"></i>
+          <i class="fa-solid fa-arrow-right-long icon-arrow"></i>
+          <i class="fa-solid fa-file-pdf icon-pdf"></i>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">Excel2PDF <span class="highlight-badge">Studio</span></h1>
+          <p class="brand-tagline">Konversi Dokumen Excel ke PDF dengan Presisi Margin & Tata Letak</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="mobileConnectBtn" class="mobile-connect-btn" title="Buka di HP / Tablet (QR Code & Wi-Fi)">
+          <i class="fa-solid fa-mobile-screen-button"></i>
+          <span>Buka di HP / Tab</span>
+        </button>
+        <button id="installPwaBtn" class="install-pwa-btn hidden" title="Pasang Aplikasi ke Layar Utama HP">
+          <i class="fa-solid fa-circle-arrow-down"></i>
+          <span>Pasang App</span>
+        </button>
+        <div id="engineStatusBadge" class="status-pill status-ready" title="Status Engine Microsoft Excel">
+          <span class="status-dot"></span>
+          <span id="engineStatusText">Memeriksa Engine...</span>
+        </div>
+        <button id="themeToggleBtn" class="icon-btn" title="Ganti Mode Tampilan (Gelap / Terang)">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-wrapper">
+    <div class="content-grid">
+      
+      <!-- Left Column: Settings & Configuration Form -->
+      <section class="config-panel card-glass">
+        
+        <!-- STEP 1: Upload Excel File -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="step-bubble">1</span>
+            <div>
+              <h2 class="section-title">Pilih File Excel</h2>
+              <p class="section-subtitle">Dukungan format .xlsx, .xls, .xlsm, .csv</p>
+            </div>
+          </div>
+
+          <!-- Dropzone -->
+          <div id="dropZone" class="dropzone-area" tabindex="0" role="button" aria-label="Area Unggah File Excel">
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.xlsm,.csv" class="file-input-hidden">
+            <div class="dropzone-content">
+              <div class="upload-icon-pulse">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+              </div>
+              <h3 class="dropzone-title">Pilih atau Tarik File Excel ke Sini</h3>
+              <p class="dropzone-desc">Sentuh untuk <span class="browse-link">Telusuri File dari HP / Komputer</span></p>
+              <div class="dropzone-badges">
+                <span class="filetype-badge">XLSX</span>
+                <span class="filetype-badge">XLS</span>
+                <span class="filetype-badge">XLSM</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Selected File Card (Hidden Initially) -->
+          <div id="fileInfoCard" class="file-info-card hidden">
+            <div class="file-info-left">
+              <div class="file-icon-box">
+                <i class="fa-solid fa-file-excel"></i>
+              </div>
+              <div class="file-info-meta">
+                <div id="fileNameDisplay" class="file-name">rekap_laporan.xlsx</div>
+                <div class="file-meta-row">
+                  <span id="fileSizeDisplay" class="meta-tag">145 KB</span>
+                  <span id="fileSheetsCountDisplay" class="meta-tag">3 Sheets</span>
+                </div>
+              </div>
+            </div>
+            <button id="removeFileBtn" class="remove-btn" title="Ganti File">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <!-- Sheet Selection Dropdown -->
+          <div id="sheetSelectGroup" class="form-group sheet-group hidden">
+            <label for="sheetSelect" class="form-label">
+              <i class="fa-solid fa-layer-group"></i> Lembar Kerja yang Dikonversi:
+            </label>
+            <div class="select-wrapper">
+              <select id="sheetSelect" class="custom-select">
+                <option value="all">Semua Lembar Kerja (Gabungkan ke 1 PDF)</option>
+              </select>
+              <i class="fa-solid fa-chevron-down select-chevron"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider-line"></div>
+
+        <!-- STEP 2: Margin Settings -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="step-bubble">2</span>
+            <div>
+              <div class="header-with-toggle">
+                <h2 class="section-title">Pengaturan Margin</h2>
+                <!-- Unit Switcher (cm vs inch) -->
+                <div class="unit-switcher" role="radiogroup" aria-label="Satuan Margin">
+                  <button type="button" id="unitCmBtn" class="unit-btn active" data-unit="cm">cm</button>
+                  <button type="button" id="unitInchBtn" class="unit-btn" data-unit="inch">inch</button>
+                </div>
+              </div>
+              <p class="section-subtitle">Sesuaikan batas jarak tepi dokumen sebelum dicetak</p>
+            </div>
+          </div>
+
+          <!-- Margin Presets -->
+          <div class="margin-presets-grid" role="group" aria-label="Preset Margin">
+            <button type="button" class="preset-card active" data-preset="normal">
+              <div class="preset-icon"><i class="fa-solid fa-border-all"></i></div>
+              <div class="preset-name">Normal</div>
+              <div class="preset-detail">A: 1.91 | B: 1.78</div>
+            </button>
+            <button type="button" class="preset-card" data-preset="narrow">
+              <div class="preset-icon"><i class="fa-solid fa-compress"></i></div>
+              <div class="preset-name">Sempit (Narrow)</div>
+              <div class="preset-detail">A: 1.27 | B: 0.64</div>
+            </button>
+            <button type="button" class="preset-card" data-preset="wide">
+              <div class="preset-icon"><i class="fa-solid fa-expand"></i></div>
+              <div class="preset-name">Lebar (Wide)</div>
+              <div class="preset-detail">A: 2.54 | B: 2.54</div>
+            </button>
+            <button type="button" class="preset-card" data-preset="custom">
+              <div class="preset-icon"><i class="fa-solid fa-sliders"></i></div>
+              <div class="preset-name">Kustom</div>
+              <div class="preset-detail">Atur Bebas</div>
+            </button>
+          </div>
+
+          <!-- Margin Inputs (4 Sides: Top, Bottom, Left, Right + Header/Footer) -->
+          <div class="margin-inputs-container">
+            <div class="margin-row-2col">
+              <!-- Atas (Top) -->
+              <div class="margin-field">
+                <label for="marginTop" class="field-label">
+                  <i class="fa-solid fa-arrow-up"></i> Atas (Top)
+                </label>
+                <div class="number-input-box">
+                  <input type="number" id="marginTop" step="0.1" min="0" max="15" value="1.91" class="num-input">
+                  <span class="unit-label current-unit">cm</span>
+                </div>
+              </div>
+              <!-- Bawah (Bottom) -->
+              <div class="margin-field">
+                <label for="marginBottom" class="field-label">
+                  <i class="fa-solid fa-arrow-down"></i> Bawah (Bottom)
+                </label>
+                <div class="number-input-box">
+                  <input type="number" id="marginBottom" step="0.1" min="0" max="15" value="1.91" class="num-input">
+                  <span class="unit-label current-unit">cm</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="margin-row-2col">
+              <!-- Kiri (Left) -->
+              <div class="margin-field">
+                <label for="marginLeft" class="field-label">
+                  <i class="fa-solid fa-arrow-left"></i> Kiri (Left)
+                </label>
+                <div class="number-input-box">
+                  <input type="number" id="marginLeft" step="0.1" min="0" max="15" value="1.78" class="num-input">
+                  <span class="unit-label current-unit">cm</span>
+                </div>
+              </div>
+              <!-- Kanan (Right) -->
+              <div class="margin-field">
+                <label for="marginRight" class="field-label">
+                  <i class="fa-solid fa-arrow-right"></i> Kanan (Right)
+                </label>
+                <div class="number-input-box">
+                  <input type="number" id="marginRight" step="0.1" min="0" max="15" value="1.78" class="num-input">
+                  <span class="unit-label current-unit">cm</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Optional Header & Footer Margins Toggle -->
+            <details class="more-margins-details">
+              <summary class="details-summary">
+                <i class="fa-solid fa-gear"></i> Margin Header & Footer Tambahan
+                <i class="fa-solid fa-chevron-down arrow-indicator"></i>
+              </summary>
+              <div class="margin-row-2col pt-2">
+                <div class="margin-field">
+                  <label for="marginHeader" class="field-label">Header</label>
+                  <div class="number-input-box">
+                    <input type="number" id="marginHeader" step="0.1" min="0" max="10" value="0.76" class="num-input">
+                    <span class="unit-label current-unit">cm</span>
+                  </div>
+                </div>
+                <div class="margin-field">
+                  <label for="marginFooter" class="field-label">Footer</label>
+                  <div class="number-input-box">
+                    <input type="number" id="marginFooter" step="0.1" min="0" max="10" value="0.76" class="num-input">
+                    <span class="unit-label current-unit">cm</span>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="divider-line"></div>
+
+        <!-- STEP 3: Layout & Page Setup -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="step-bubble">3</span>
+            <div>
+              <h2 class="section-title">Tata Letak & Halaman</h2>
+              <p class="section-subtitle">Orientasi kertas, ukuran, dan penskalaan tabel</p>
+            </div>
+          </div>
+
+          <!-- Orientation: Portrait vs Landscape -->
+          <div class="form-group">
+            <label class="form-label"><i class="fa-solid fa-compass"></i> Orientasi Halaman:</label>
+            <div class="orientation-switch-grid">
+              <label class="orientation-card active" data-orientation="portrait">
+                <input type="radio" name="orientation" id="orientationPortrait" value="portrait" checked class="sr-only">
+                <div class="orient-preview portrait-box"></div>
+                <div class="orient-text">
+                  <span class="orient-title">Portrait</span>
+                  <span class="orient-sub">Tegak (Standar)</span>
+                </div>
+              </label>
+              <label class="orientation-card" data-orientation="landscape">
+                <input type="radio" name="orientation" id="orientationLandscape" value="landscape" class="sr-only">
+                <div class="orient-preview landscape-box"></div>
+                <div class="orient-text">
+                  <span class="orient-title">Landscape</span>
+                  <span class="orient-sub">Mendatar (Tabel Lebar)</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Paper Size & Scaling Grid -->
+          <div class="form-row-2col">
+            <!-- Paper Size -->
+            <div class="form-group">
+              <label for="paperSize" class="form-label"><i class="fa-solid fa-scroll"></i> Ukuran Kertas:</label>
+              <div class="select-wrapper">
+                <select id="paperSize" class="custom-select">
+                  <option value="A4" selected>A4 (210 × 297 mm)</option>
+                  <option value="Letter">Letter (8.5 × 11 in)</option>
+                  <option value="Legal">Legal (8.5 × 14 in)</option>
+                  <option value="A3">A3 (297 × 420 mm)</option>
+                  <option value="Executive">Executive</option>
+                </select>
+                <i class="fa-solid fa-chevron-down select-chevron"></i>
+              </div>
+            </div>
+
+            <!-- Page Fit / Scaling -->
+            <div class="form-group">
+              <label for="fitMode" class="form-label"><i class="fa-solid fa-arrows-to-eye"></i> Penskalaan (Fit):</label>
+              <div class="select-wrapper">
+                <select id="fitMode" class="custom-select">
+                  <option value="fit_width" selected>Muat Kolom (1 Hlm Lebar)</option>
+                  <option value="fit_page">Muat 1 Lembar Penuh</option>
+                  <option value="original">Ukuran Asli (100%)</option>
+                </select>
+                <i class="fa-solid fa-chevron-down select-chevron"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Checkboxes: Centering & Gridlines -->
+          <div class="checkbox-options-grid">
+            <label class="custom-checkbox-label">
+              <input type="checkbox" id="centerHorizontally" checked>
+              <span class="checkbox-custom"></span>
+              <span class="checkbox-text">Rata Tengah Horizontal</span>
+            </label>
+            <label class="custom-checkbox-label">
+              <input type="checkbox" id="showGridlines">
+              <span class="checkbox-custom"></span>
+              <span class="checkbox-text">Cetak Garis Kisi (Gridlines)</span>
+            </label>
+            <label class="custom-checkbox-label">
+              <input type="checkbox" id="centerVertically">
+              <span class="checkbox-custom"></span>
+              <span class="checkbox-text">Rata Tengah Vertikal</span>
+            </label>
+            <label class="custom-checkbox-label">
+              <input type="checkbox" id="showHeadings">
+              <span class="checkbox-custom"></span>
+              <span class="checkbox-text">Cetak Heading Kolom/Baris</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Convert Action Button -->
+        <div class="panel-action-wrap">
+          <button id="convertBtn" class="convert-cta-btn" disabled>
+            <span class="btn-spinner hidden" id="convertSpinner"></span>
+            <i class="fa-solid fa-wand-magic-sparkles btn-icon" id="convertIcon"></i>
+            <span id="convertBtnText">Konversi ke PDF</span>
+          </button>
+          <p id="convertHintText" class="action-hint">Pilih file Excel terlebih dahulu untuk memulai konversi</p>
+        </div>
+
+      </section>
+
+      <!-- Right Column: Visual Margin Mockup & Live PDF Result Preview -->
+      <section class="preview-panel card-glass">
+        
+        <!-- Tab Switcher between Margin Visualizer & Converted PDF Preview -->
+        <div class="preview-header">
+          <div class="preview-tabs" role="tablist">
+            <button id="tabVisualizerBtn" class="tab-btn active" role="tab" aria-selected="true">
+              <i class="fa-solid fa-ruler-combined"></i> Simulasi Margin Real-Time
+            </button>
+            <button id="tabPdfResultBtn" class="tab-btn" role="tab" aria-selected="false">
+              <i class="fa-solid fa-file-pdf"></i> Hasil PDF & Pratinjau
+              <span id="resultBadgeCounter" class="tab-counter hidden">Ready</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1 CONTENT: Interactive Visual Margin Paper Mockup -->
+        <div id="tabVisualizerContent" class="tab-content active">
+          <div class="visualizer-intro">
+            <h3>Visualisasi Halaman & Tepi Margin</h3>
+            <p>Area putih mewakili kertas, garis hijau toska mewakili batas margin aktif yang akan diterapkan pada dokumen PDF.</p>
+          </div>
+
+          <div class="visualizer-stage-wrap">
+            <div id="paperMockup" class="paper-mockup portrait-mode">
+              
+              <!-- Margin Dimension Indicators -->
+              <div id="visIndicatorTop" class="margin-indicator ind-top">
+                <span class="ind-line"></span>
+                <span class="ind-val" id="visValTop">1.91 cm</span>
+              </div>
+              <div id="visIndicatorBottom" class="margin-indicator ind-bottom">
+                <span class="ind-line"></span>
+                <span class="ind-val" id="visValBottom">1.91 cm</span>
+              </div>
+              <div id="visIndicatorLeft" class="margin-indicator ind-left">
+                <span class="ind-line"></span>
+                <span class="ind-val" id="visValLeft">1.78 cm</span>
+              </div>
+              <div id="visIndicatorRight" class="margin-indicator ind-right">
+                <span class="ind-line"></span>
+                <span class="ind-val" id="visValRight">1.78 cm</span>
+              </div>
+
+              <!-- Printable Content Area Inside Margins -->
+              <div id="paperPrintableArea" class="printable-content-area">
+                <div class="mockup-header-bar">
+                  <div class="mockup-logo-dot"></div>
+                  <div class="mockup-line title-line"></div>
+                </div>
+                <div class="mockup-table">
+                  <div class="mockup-table-row th-row">
+                    <div class="th-cell w-20"></div>
+                    <div class="th-cell w-40"></div>
+                    <div class="th-cell w-20"></div>
+                    <div class="th-cell w-20"></div>
+                  </div>
+                  <div class="mockup-table-row">
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-40"></div>
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-20"></div>
+                  </div>
+                  <div class="mockup-table-row">
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-40"></div>
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-20"></div>
+                  </div>
+                  <div class="mockup-table-row">
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-40"></div>
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-20"></div>
+                  </div>
+                  <div class="mockup-table-row">
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-40"></div>
+                    <div class="td-cell w-20"></div>
+                    <div class="td-cell w-20"></div>
+                  </div>
+                </div>
+                <div class="mockup-footer-bar">
+                  <div class="mockup-line short-line"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Tip Box -->
+          <div class="info-tip-card">
+            <i class="fa-solid fa-lightbulb tip-icon"></i>
+            <div class="tip-body">
+              <strong>Tips Margin:</strong> Gunakan preset <b>Sempit (Narrow)</b> dan orientasi <b>Landscape</b> jika tabel Excel Anda memiliki banyak kolom, agar seluruh kolom tercetak rapi tanpa terpotong!
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2 CONTENT: Result & High-Res PDF Viewer -->
+        <div id="tabPdfResultContent" class="tab-content hidden">
+          
+          <!-- Empty State (Before Conversion) -->
+          <div id="emptyResultPlaceholder" class="empty-state">
+            <div class="empty-icon-circle">
+              <i class="fa-solid fa-file-pdf"></i>
+            </div>
+            <h3>Belum Ada Hasil Konversi</h3>
+            <p>Unggah file Excel di sebelah kiri dan klik tombol <b>Konversi ke PDF</b> untuk melihat pratinjau dokumen langsung di sini.</p>
+          </div>
+
+          <!-- Success State (After Conversion) -->
+          <div id="conversionSuccessArea" class="success-result-container hidden">
+            
+            <!-- Result Stats Bar -->
+            <div class="result-stats-bar">
+              <div class="stat-item">
+                <span class="stat-label">Nama File PDF</span>
+                <span id="resPdfName" class="stat-val font-mono">laporan.pdf</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Ukuran PDF</span>
+                <span id="resPdfSize" class="stat-val">85 KB</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Halaman</span>
+                <span id="resPdfPages" class="stat-val">1 Halaman</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Waktu Proses</span>
+                <span id="resPdfDuration" class="stat-val">0.8 detik</span>
+              </div>
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div class="result-actions-row">
+              <a id="downloadPdfBtn" href="#" class="btn-download" download>
+                <i class="fa-solid fa-download"></i> Unduh File PDF
+              </a>
+              <button id="sharePdfBtn" class="btn-secondary" title="Kirim / Bagikan File PDF (WhatsApp, Drive, dll)">
+                <i class="fa-solid fa-share-nodes"></i> Bagikan
+              </button>
+              <a id="openTabPdfBtn" href="#" target="_blank" class="btn-secondary">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> Buka di Tab Baru
+              </a>
+              <button id="resetAllBtn" class="btn-outline">
+                <i class="fa-solid fa-rotate-left"></i> Konversi Lagi
+              </button>
+            </div>
+
+            <!-- Interactive Multi-Page Preview Gallery -->
+            <div class="preview-gallery-container">
+              <div class="gallery-toolbar">
+                <div class="page-nav-group">
+                  <button id="prevPageBtn" class="nav-arrow-btn" title="Halaman Sebelumnya">
+                    <i class="fa-solid fa-chevron-left"></i>
+                  </button>
+                  <span id="pageIndicatorText" class="page-indicator">Halaman 1 dari 1</span>
+                  <button id="nextPageBtn" class="nav-arrow-btn" title="Halaman Selanjutnya">
+                    <i class="fa-solid fa-chevron-right"></i>
+                  </button>
+                </div>
+
+                <div class="zoom-group">
+                  <button id="zoomOutBtn" class="tool-btn" title="Perkecil"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+                  <span id="zoomLevelText" class="zoom-text">100%</span>
+                  <button id="zoomInBtn" class="tool-btn" title="Perbesar"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+                  <button id="zoomResetBtn" class="tool-btn" title="Pas Ukuran"><i class="fa-solid fa-expand"></i></button>
+                </div>
+              </div>
+
+              <!-- Canvas / Image Viewer Stage -->
+              <div id="viewerStage" class="viewer-stage">
+                <div id="previewImageWrapper" class="preview-img-wrapper">
+                  <img id="pdfPageImage" src="" alt="Pratinjau Halaman PDF" class="rendered-pdf-page">
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Modal Buka di HP / Tablet -->
+  <div id="mobileModalOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mobileModalTitle">
+    <div class="modal-backdrop" id="mobileModalBackdrop"></div>
+    <div class="modal-card card-glass">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-circle">
+            <i class="fa-solid fa-mobile-screen-button"></i>
+          </div>
+          <div>
+            <h3 id="mobileModalTitle" class="modal-title">Buka di HP atau Tablet</h3>
+            <p class="modal-subtitle">Gunakan aplikasi langsung dari browser HP tanpa file APK</p>
+          </div>
+        </div>
+        <button id="closeMobileModalBtn" class="modal-close-btn" aria-label="Tutup Modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <!-- QR Code Section -->
+        <div class="qr-box-wrap">
+          <div id="qrcodeBox" class="qrcode-canvas-box"></div>
+          <p class="qr-caption">
+            <i class="fa-solid fa-camera"></i> Pindai QR Code ini dengan Kamera HP / Tablet
+          </p>
+        </div>
+
+        <!-- Connection Instructions -->
+        <div class="connect-guide-wrap">
+          <div class="guide-item">
+            <span class="guide-badge">1</span>
+            <div class="guide-text">
+              <strong>Sambungkan ke Wi-Fi yang Sama</strong>
+              <p>Pastikan HP atau Tablet terhubung ke jaringan Wi-Fi yang sama dengan komputer ini.</p>
+            </div>
+          </div>
+
+          <div class="guide-item">
+            <span class="guide-badge">2</span>
+            <div class="guide-text">
+              <strong>Buka Browser di HP (Chrome / Safari)</strong>
+              <p>Ketik alamat IP berikut di address bar browser HP Anda:</p>
+              <div class="copy-url-group">
+                <input type="text" id="mobileUrlDisplay" readonly value="http://localhost:8000" class="mobile-url-input">
+                <button id="copyMobileUrlBtn" class="copy-btn" title="Salin Alamat">
+                  <i class="fa-solid fa-copy"></i> <span>Salin</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="guide-item">
+            <span class="guide-badge">3</span>
+            <div class="guide-text">
+              <strong>Jadikan Aplikasi di Layar Utama HP</strong>
+              <p>Di browser HP, klik menu <b>(⋮)</b> atau tombol Bagikan, lalu pilih <i>"Tambahkan ke Layar Utama" (Add to Home screen)</i> untuk membukanya seperti aplikasi biasa!</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- Loading Modal Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-card card-glass">
+      <div class="spinner-outer">
+        <div class="spinner-inner"></div>
+        <i class="fa-solid fa-file-pdf spinner-icon"></i>
+      </div>
+      <h3 class="loading-title">Mengonversi Dokumen...</h3>
+      <p id="loadingStatusText" class="loading-desc">Menerapkan pengaturan margin & merender PDF melalui Microsoft Excel Native COM</p>
+      <div class="loading-progress-bar">
+        <div class="progress-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Offline Engine Libraries -->
+  <script src="libs/qrcode.min.js"></script>
+  <script src="libs/xlsx.full.min.js"></script>
+  <script src="libs/jspdf.umd.min.js"></script>
+  <script src="libs/jspdf.plugin.autotable.min.js"></script>
+  <script src="libs/pdf.min.js"></script>
+  <script src="offline_converter.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
