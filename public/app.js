@@ -458,7 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
       const res = await fetch('/api/inspect', {
         method: 'POST',
         body: formData,
@@ -773,68 +773,84 @@ document.addEventListener('DOMContentLoaded', () => {
 
     updateProgress('Menyiapkan parameter konversi...', '15%');
 
-    // 1. If in Cloud (Vercel), Offline Mode, or file not uploaded to server: perform INSTANT client-side conversion
-    const isCloudOrOffline = state.isOfflineMode || window.location.hostname.includes('vercel.app') || !state.uploadId;
+    // Determine if server is available (Local PC / network server)
+    const isLocalServer = !window.location.hostname.includes('vercel.app') && !state.isOfflineMode;
 
-    if (isCloudOrOffline) {
+    if (isLocalServer) {
+      updateProgress('Menghubungkan ke Microsoft Excel Native COM...', '25%');
+
+      const formData = new FormData();
+      if (state.uploadId) {
+        formData.append('upload_id', state.uploadId);
+      } else if (state.currentFile) {
+        formData.append('file', state.currentFile);
+      }
+
+      Object.keys(convOptions).forEach(k => {
+        formData.append(k, convOptions[k]);
+      });
+
+      let elapsed = 0;
+      const progressTimer = setInterval(() => {
+        elapsed++;
+        if (elapsed === 3) updateProgress('Microsoft Excel sedang membuka file & memproses rumus...', '45%');
+        else if (elapsed === 7) updateProgress('Menata margin, orientasi & penskalaan halaman...', '65%');
+        else if (elapsed === 12) updateProgress('Memproses seluruh halaman dokumen (bisa memakan waktu untuk dokumen besar)...', '80%');
+        else if (elapsed === 20) updateProgress('Mengekspor ke format PDF resolusi tinggi...', '90%');
+      }, 1000);
+
       try {
-        await executeOfflineConversion(convOptions, updateProgress);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes max
+
+        const res = await fetch('/api/convert', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        clearInterval(progressTimer);
+
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/json')) {
+          const errText = await res.text().catch(() => '');
+          throw new Error(`Server error (${res.status}): ${errText.slice(0, 100)}`);
+        }
+
+        updateProgress('Menerima hasil cetak PDF...', '95%');
+        const result = await res.json();
+
+        if (!result.success) {
+          throw new Error(result.detail || "Konversi gagal pada server.");
+        }
+
+        state.convertedTask = result;
+        state.currentPage = 1;
+        state.zoomLevel = 100;
+
+        updateProgress('Selesai!', '100%');
+        displayConversionResult(result);
+        showToast(`Berhasil dikonversi oleh ${result.engine || 'Microsoft Excel'} (${result.duration_seconds}s)!`, 'success');
+
+        resultBadgeCounter.classList.remove('hidden');
+        switchTab('pdfResult');
         return;
       } catch (err) {
-        console.warn("Client-side conversion error, attempting server fallback:", err);
+        clearInterval(progressTimer);
+        console.warn("Server conversion failed or timed out, falling back to client-side engine:", err);
+        showToast("Server tidak merespons, mencoba engine client-side...", "info");
       } finally {
+        clearInterval(progressTimer);
         cleanupLoading();
       }
     }
 
-    // 2. Otherwise try Native Windows Server COM (with strict 8s timeout to avoid hanging)
-    updateProgress('Mengirim file ke Microsoft Excel Native COM...', '35%');
-    const formData = new FormData();
-    if (state.uploadId) {
-      formData.append('upload_id', state.uploadId);
-    } else {
-      formData.append('file', state.currentFile);
-    }
-
-    Object.keys(convOptions).forEach(k => {
-      formData.append(k, convOptions[k]);
-    });
-
+    // Fallback: Client-side Offline Engine (for Vercel or offline mode)
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s max
-
-      const res = await fetch('/api/convert', {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!res.ok || !contentType.includes('application/json')) {
-        throw new Error("Server tidak merespons dengan JSON valid");
-      }
-
-      updateProgress('Menerima hasil cetak PDF...', '85%');
-      const result = await res.json();
-      state.convertedTask = result;
-      state.currentPage = 1;
-      state.zoomLevel = 100;
-
-      updateProgress('Selesai!', '100%');
-      displayConversionResult(result);
-      showToast('Berhasil mengonversi Excel ke PDF via Microsoft Excel COM!', 'success');
-
-      resultBadgeCounter.classList.remove('hidden');
-      switchTab('pdfResult');
-    } catch (err) {
-      console.warn("Server timeout atau gagal, beralih instan ke engine client-side...", err);
-      try {
-        await executeOfflineConversion(convOptions, updateProgress);
-      } catch (offErr) {
-        showToast(`Error: ${offErr.message}`, 'error');
-      }
+      loadingOverlay.classList.remove('hidden');
+      await executeOfflineConversion(convOptions, updateProgress);
+    } catch (offErr) {
+      showToast(`Error konversi: ${offErr.message}`, 'error');
     } finally {
       cleanupLoading();
     }

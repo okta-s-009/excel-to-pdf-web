@@ -212,7 +212,7 @@
             dataStartIdx = ri + 1;
             continue;
           }
-          if (filledCount <= 2 && longestCell > 20 && maxCols > 3) {
+          if (filledCount <= 3 && maxCols > 3) {
             // This is a title row
             const titleText = filledCells.join(' ').trim();
             titleLines.push(titleText);
@@ -335,17 +335,47 @@
           }
         }
 
-        // ======= COMPUTE COLUMN STYLES (proportional widths + alignment) =======
-        const totalWeight = colMeta.reduce((s, m) => s + m.weight, 0);
+        // ======= COMPUTE COLUMN STYLES (Intelligent sizing & Wide Table Protection) =======
+        const isWideTable = maxCols > 12;
         const columnStyles = {};
-        for (let c = 0; c < maxCols; c++) {
-          const proportion = colMeta[c].weight / totalWeight;
-          const colWidthMm = Math.max(proportion * printableWidth, 5);
-          
-          columnStyles[c] = {
-            cellWidth: colWidthMm,
-            halign: colMeta[c].isNumeric ? 'right' : (colMeta[c].isIndex ? 'center' : 'left')
-          };
+
+        if (isWideTable) {
+          // For wide tables (e.g. RAB with 15-30 columns):
+          // Give every column its comfortable natural width so numbers and words never wrap awkwardly.
+          // jsPDF AutoTable will cleanly split excess columns across pages using horizontalPageBreak.
+          for (let c = 0; c < maxCols; c++) {
+            const m = colMeta[c];
+            let widthMm = 16; // default comfortable width
+            if (m.isIndex) {
+              widthMm = 10;
+            } else if (m.isCurrency) {
+              widthMm = 28; // Fits 'Rp 115.000,00' on a single clean line
+            } else if (m.isNumeric) {
+              widthMm = 16;
+            } else if (c === 1 || m.maxTextLen > 25) {
+              widthMm = 40; // Wide room for 'Uraian Pekerjaan' / long names
+            } else {
+              widthMm = Math.max(m.avgLen * 1.8, 18);
+            }
+
+            columnStyles[c] = {
+              cellWidth: widthMm,
+              halign: m.isNumeric ? 'right' : (m.isIndex ? 'center' : 'left')
+            };
+          }
+        } else {
+          // For standard tables (<= 12 columns):
+          // Scale proportionally to fill printable page width perfectly
+          const totalWeight = colMeta.reduce((s, m) => s + m.weight, 0);
+          for (let c = 0; c < maxCols; c++) {
+            const proportion = colMeta[c].weight / totalWeight;
+            const colWidthMm = Math.max(proportion * printableWidth, 10);
+            
+            columnStyles[c] = {
+              cellWidth: colWidthMm,
+              halign: colMeta[c].isNumeric ? 'right' : (colMeta[c].isIndex ? 'center' : 'left')
+            };
+          }
         }
 
         // Add page if not the first table
@@ -382,23 +412,21 @@
         }
 
         // ======= DYNAMIC FONT SIZE =======
-        let fontSize = 9;
-        let cellPadding = 1.8;
+        let fontSize = 8;
+        let cellPadding = 1.4;
 
-        if (fitMode === 'fit_width' || fitMode === 'fit_page') {
-          if (maxCols > 20) {
-            fontSize = 5;
-            cellPadding = 0.5;
-          } else if (maxCols > 14) {
-            fontSize = 6;
-            cellPadding = 0.7;
-          } else if (maxCols > 10) {
-            fontSize = 7;
-            cellPadding = 1.0;
-          } else if (maxCols > 7) {
+        if (!isWideTable) {
+          if (maxCols > 9) {
             fontSize = 7.5;
             cellPadding = 1.2;
+          } else if (maxCols <= 6) {
+            fontSize = 9;
+            cellPadding = 1.8;
           }
+        } else {
+          // In wide tables with horizontalPageBreak, columns have ample room
+          fontSize = 7;
+          cellPadding = 1.0;
         }
 
         // ======= BUILD AUTOTABLE CONFIG =======
@@ -416,7 +444,9 @@
             left: leftMm,
             right: rightMm
           },
-          tableWidth: printableWidth,
+          tableWidth: isWideTable ? 'wrap' : printableWidth,
+          horizontalPageBreak: isWideTable,
+          horizontalPageBreakRepeat: isWideTable ? [0, 1] : null,
           theme: 'grid',
           columnStyles: columnStyles,
           styles: {
