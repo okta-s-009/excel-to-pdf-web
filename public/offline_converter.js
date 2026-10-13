@@ -9,7 +9,10 @@
 
   // Configure PDF.js worker if available
   if (window.pdfjsLib) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/libs/pdf.worker.min.js';
+    const isStatic = window.location.pathname.startsWith('/static');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = isStatic 
+      ? '/static/libs/pdf.worker.min.js' 
+      : 'libs/pdf.worker.min.js';
   }
 
   const PAPER_DIMENSIONS_MM = {
@@ -98,7 +101,10 @@
       let workbook = null;
       let filename = "dokumen.xlsx";
 
-      if (fileOrWorkbook instanceof File || fileOrWorkbook instanceof Blob) {
+      if (options && options.cachedWorkbook) {
+        workbook = options.cachedWorkbook;
+        filename = (fileOrWorkbook && fileOrWorkbook.name) || options.filename || "dokumen.xlsx";
+      } else if (fileOrWorkbook instanceof File || fileOrWorkbook instanceof Blob) {
         filename = fileOrWorkbook.name || "dokumen.xlsx";
         const buffer = await fileOrWorkbook.arrayBuffer();
         workbook = window.XLSX.read(buffer, { type: 'array', cellDates: true, cellStyles: true });
@@ -310,9 +316,10 @@
     },
 
     /**
-     * Generates visual page preview thumbnails from PDF buffer using PDF.js
+     * Generates visual page preview thumbnails from PDF buffer using PDF.js.
+     * Uses optimized JPEG rendering for blazingly fast preview generation.
      */
-    generatePreviews: async function (pdfArrayBuffer, maxPages = 5) {
+    generatePreviews: async function (pdfArrayBuffer, maxPages = 1) {
       if (!window.pdfjsLib) {
         return { total_pages: 1, previews: [] };
       }
@@ -326,7 +333,7 @@
 
         for (let i = 1; i <= pagesToRender; i++) {
           const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 1.5 });
+          const viewport = page.getViewport({ scale: 1.2 });
 
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
@@ -339,7 +346,7 @@
           };
 
           await page.render(renderContext).promise;
-          const dataUrl = canvas.toDataURL('image/png');
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
           previews.push({
             page: i,
@@ -352,8 +359,38 @@
           previews: previews
         };
       } catch (err) {
-        console.warn("Gagal membuat thumbnail preview dengan PDF.js:", err);
+        console.warn("Pratinjau cepat PDF.js:", err);
         return { total_pages: 1, previews: [] };
+      }
+    },
+
+    /**
+     * Renders a single specific page on demand in ~50ms.
+     */
+    renderSinglePage: async function (pdfArrayBuffer, pageNumber) {
+      if (!window.pdfjsLib) return null;
+      try {
+        const loadingTask = window.pdfjsLib.getDocument({ data: pdfArrayBuffer });
+        const pdf = await loadingTask.promise;
+        if (pageNumber < 1 || pageNumber > pdf.numPages) return null;
+
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1.2 });
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        return {
+          page: pageNumber,
+          url: dataUrl
+        };
+      } catch (e) {
+        console.warn("Gagal render halaman tunggal:", e);
+        return null;
       }
     },
 

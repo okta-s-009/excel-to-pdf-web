@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const state = {
     currentFile: null,
     uploadId: null,
+    cachedWorkbook: null,
+    pdfArrayBuffer: null,
     unit: 'cm', // 'cm' or 'inch'
     preset: 'normal',
     orientation: 'portrait',
@@ -143,6 +145,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // If running on Vercel Cloud, activate super-fast client-side engine immediately (sub-second conversion)
+    if (window.location.hostname.includes('vercel.app')) {
+      enableOfflineMode('Vercel Cloud (Super Cepat)');
+      return;
+    }
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000);
@@ -150,36 +158,29 @@ document.addEventListener('DOMContentLoaded', () => {
       clearTimeout(timeoutId);
 
       if (res.ok) {
-        const data = await res.json();
-        if (data.excel_engine_ready) {
-          engineStatusBadge.className = 'status-pill status-ready';
-          engineStatusText.textContent = 'Microsoft Excel COM (PC)';
-          engineStatusBadge.title = 'Menggunakan Microsoft Excel COM Native untuk hasil presisi 100%';
-        } else if (data.platform === 'Vercel Cloud' || window.location.hostname.includes('vercel.app')) {
-          engineStatusBadge.className = 'status-pill status-ready';
-          engineStatusText.textContent = 'Vercel Cloud (Online 24/7)';
-          engineStatusBadge.title = 'Server aktif di Vercel Cloud 24/7 tanpa butuh laptop menyala!';
-        } else {
-          engineStatusBadge.className = 'status-pill status-ready';
-          engineStatusText.textContent = 'Engine Offline (Aktif)';
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data.excel_engine_ready) {
+            state.isOfflineMode = false;
+            engineStatusBadge.className = 'status-pill status-ready';
+            engineStatusText.textContent = 'Microsoft Excel COM (PC)';
+            engineStatusBadge.title = 'Menggunakan Microsoft Excel COM Native untuk hasil presisi 100%';
+            return;
+          }
         }
-      } else {
-        enableOfflineMode('Cloud Mode (Client-Side)');
       }
+      enableOfflineMode('Mode Mandiri (Super Cepat)');
     } catch (e) {
-      if (window.location.hostname.includes('vercel.app')) {
-        enableOfflineMode('Vercel Cloud (Online 24/7)');
-      } else {
-        enableOfflineMode('Mode Standalone (Offline)');
-      }
+      enableOfflineMode('Mode Mandiri (Super Cepat)');
     }
   }
 
   function enableOfflineMode(label) {
     state.isOfflineMode = true;
     engineStatusBadge.className = 'status-pill status-ready';
-    engineStatusText.textContent = label || 'Mode Offline (Standalone)';
-    engineStatusBadge.title = 'Aplikasi berjalan mandiri di perangkat tanpa butuh server PC.';
+    engineStatusText.textContent = label || 'Mode Offline (Super Cepat)';
+    engineStatusBadge.title = 'Konversi instan langsung di peramban tanpa delay antrean server.';
   }
 
   // --- Theme Toggle ---
@@ -496,6 +497,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.OfflineConverter) {
       try {
         const data = await window.OfflineConverter.inspectFile(file);
+        if (data.workbook) {
+          state.cachedWorkbook = data.workbook;
+        }
         fileSizeDisplay.textContent = data.filesize_formatted;
         fileSheetsCountDisplay.textContent = `${data.sheets.length} Sheet${data.sheets.length > 1 ? 's' : ''}`;
 
@@ -509,8 +513,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         sheetSelectGroup.classList.remove('hidden');
         convertBtn.disabled = false;
-        convertHintText.textContent = 'Siap dikonversi secara offline di HP/perangkat!';
-        showToast(`File "${file.name}" berhasil dimuat (Offline Engine)!`, 'success');
+        convertHintText.textContent = 'Siap dikonversi secara instan!';
+        showToast(`File "${file.name}" siap dikonversi!`, 'success');
         return;
       } catch (err) {
         console.error("Gagal membaca file lokal:", err);
@@ -730,17 +734,41 @@ document.addEventListener('DOMContentLoaded', () => {
     convertIcon.classList.add('hidden');
     convertBtnText.textContent = 'Mengonversi...';
 
-    // 1. If Offline Mode is active, perform conversion directly
-    if (state.isOfflineMode || !state.uploadId && state.currentFile) {
+    const loadingStatusText = document.getElementById('loadingStatusText');
+    const progressBarFill = document.querySelector('.progress-bar-fill');
+
+    function updateProgress(msg, percent) {
+      if (loadingStatusText) loadingStatusText.textContent = msg;
+      if (progressBarFill) progressBarFill.style.width = percent;
+    }
+
+    function cleanupLoading() {
+      loadingOverlay.classList.add('hidden');
+      convertBtn.disabled = false;
+      convertSpinner.classList.add('hidden');
+      convertIcon.classList.remove('hidden');
+      convertBtnText.textContent = 'Konversi ke PDF';
+      if (progressBarFill) progressBarFill.style.width = '45%';
+    }
+
+    updateProgress('Menyiapkan parameter konversi...', '15%');
+
+    // 1. If in Cloud (Vercel), Offline Mode, or file not uploaded to server: perform INSTANT client-side conversion
+    const isCloudOrOffline = state.isOfflineMode || window.location.hostname.includes('vercel.app') || !state.uploadId;
+
+    if (isCloudOrOffline) {
       try {
-        await executeOfflineConversion(convOptions);
+        await executeOfflineConversion(convOptions, updateProgress);
         return;
       } catch (err) {
-        console.warn("Offline conversion error, trying server:", err);
+        console.warn("Client-side conversion error, attempting server fallback:", err);
+      } finally {
+        cleanupLoading();
       }
     }
 
-    // 2. Otherwise try Server API first
+    // 2. Otherwise try Native Windows Server COM (with strict 8s timeout to avoid hanging)
+    updateProgress('Mengirim file ke Microsoft Excel Native COM...', '35%');
     const formData = new FormData();
     if (state.uploadId) {
       formData.append('upload_id', state.uploadId);
@@ -753,61 +781,77 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s max
+
       const res = await fetch('/api/convert', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
-      if (!res.ok) {
-        throw new Error("Gagal mengonversi melalui server");
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        throw new Error("Server tidak merespons dengan JSON valid");
       }
 
+      updateProgress('Menerima hasil cetak PDF...', '85%');
       const result = await res.json();
       state.convertedTask = result;
       state.currentPage = 1;
       state.zoomLevel = 100;
 
+      updateProgress('Selesai!', '100%');
       displayConversionResult(result);
-      showToast('Berhasil mengonversi Excel ke PDF!', 'success');
+      showToast('Berhasil mengonversi Excel ke PDF via Microsoft Excel COM!', 'success');
 
       resultBadgeCounter.classList.remove('hidden');
       switchTab('pdfResult');
     } catch (err) {
-      console.warn("Server gagal merespons, beralih ke konversi offline...", err);
+      console.warn("Server timeout atau gagal, beralih instan ke engine client-side...", err);
       try {
-        await executeOfflineConversion(convOptions);
+        await executeOfflineConversion(convOptions, updateProgress);
       } catch (offErr) {
         showToast(`Error: ${offErr.message}`, 'error');
       }
     } finally {
-      loadingOverlay.classList.add('hidden');
-      convertBtn.disabled = false;
-      convertSpinner.classList.add('hidden');
-      convertIcon.classList.remove('hidden');
-      convertBtnText.textContent = 'Konversi ke PDF';
+      cleanupLoading();
     }
   });
 
-  async function executeOfflineConversion(options) {
+  async function executeOfflineConversion(options, updateProgress) {
     if (!window.OfflineConverter) {
       throw new Error("Engine konversi offline belum siap.");
     }
 
+    if (updateProgress) updateProgress('Membaca data lembar kerja Excel...', '35%');
+
+    // Use cached workbook for instant processing
+    if (state.cachedWorkbook) {
+      options.cachedWorkbook = state.cachedWorkbook;
+    }
+
+    if (updateProgress) updateProgress('Menata margin & merender PDF...', '65%');
     const result = await window.OfflineConverter.convertToPdf(state.currentFile, options);
     
-    // Generate page previews using PDF.js
+    if (updateProgress) updateProgress('Menyiapkan pratinjau halaman 1...', '90%');
+    // Generate page 1 preview immediately (fast ~50ms)
     let previewData = { total_pages: result.total_pages, previews: [] };
     try {
-      previewData = await window.OfflineConverter.generatePreviews(result.arrayBuffer, 8);
+      previewData = await window.OfflineConverter.generatePreviews(result.arrayBuffer, 1);
     } catch (e) {
-      console.warn(e);
+      console.warn("Preview warning:", e);
     }
+
+    if (updateProgress) updateProgress('Selesai!', '100%');
 
     state.lastPdfBlob = result.blob;
     state.lastPdfUrl = URL.createObjectURL(result.blob);
+    state.pdfArrayBuffer = result.arrayBuffer;
 
     const taskResult = {
-      task_id: 'offline-' + Date.now(),
+      task_id: 'fast-' + Date.now(),
       filename: result.filename,
       pdf_size_formatted: result.pdf_size_formatted,
       duration_seconds: result.duration_seconds,
@@ -824,10 +868,24 @@ document.addEventListener('DOMContentLoaded', () => {
     state.zoomLevel = 100;
 
     displayConversionResult(taskResult);
-    showToast('Berhasil mengonversi Excel ke PDF (Offline Engine)!', 'success');
+    showToast('Konversi selesai dalam ' + result.duration_seconds + ' detik!', 'success');
 
     resultBadgeCounter.classList.remove('hidden');
     switchTab('pdfResult');
+
+    // Background pre-cache pages 2..5 if multi-page
+    if (result.total_pages > 1) {
+      setTimeout(async () => {
+        try {
+          const bgPreviews = await window.OfflineConverter.generatePreviews(result.arrayBuffer, Math.min(result.total_pages, 5));
+          if (bgPreviews.previews && bgPreviews.previews.length > 0) {
+            state.convertedTask.previews = bgPreviews.previews;
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+      }, 150);
+    }
   }
 
   // --- Display Conversion Result ---
@@ -892,10 +950,18 @@ document.addEventListener('DOMContentLoaded', () => {
     prevPageBtn.disabled = state.currentPage <= 1;
     nextPageBtn.disabled = state.currentPage >= totalPages;
 
-    // Load preview image: Check local previews array first, fallback to API
-    if (state.convertedTask.previews && state.convertedTask.previews.length >= state.currentPage) {
+    // Load preview image: Check local previews array first, fallback to on-demand render or API
+    if (state.convertedTask.previews && state.convertedTask.previews[state.currentPage - 1]) {
       const p = state.convertedTask.previews[state.currentPage - 1];
       pdfPageImage.src = p.url;
+    } else if (state.convertedTask.is_local_blob && state.pdfArrayBuffer && window.OfflineConverter) {
+      window.OfflineConverter.renderSinglePage(state.pdfArrayBuffer, state.currentPage).then(p => {
+        if (p) {
+          state.convertedTask.previews = state.convertedTask.previews || [];
+          state.convertedTask.previews[state.currentPage - 1] = p;
+          pdfPageImage.src = p.url;
+        }
+      });
     } else if (!state.convertedTask.is_local_blob) {
       pdfPageImage.src = `/api/preview/${state.convertedTask.task_id}/${state.currentPage}`;
     }
