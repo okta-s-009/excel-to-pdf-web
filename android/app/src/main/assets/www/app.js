@@ -118,10 +118,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const engineStatusText = document.getElementById('engineStatusText');
   const toastContainer = document.getElementById('toastContainer');
 
+  // Mobile Connect & PWA Elements
+  const mobileConnectBtn = document.getElementById('mobileConnectBtn');
+  const installPwaBtn = document.getElementById('installPwaBtn');
+  const mobileModalOverlay = document.getElementById('mobileModalOverlay');
+  const mobileModalBackdrop = document.getElementById('mobileModalBackdrop');
+  const closeMobileModalBtn = document.getElementById('closeMobileModalBtn');
+  const mobileUrlDisplay = document.getElementById('mobileUrlDisplay');
+  const copyMobileUrlBtn = document.getElementById('copyMobileUrlBtn');
+  const qrcodeBox = document.getElementById('qrcodeBox');
+
   // --- Initial Setup ---
   initTheme();
   checkEngineStatus();
   updateVisualMockup();
+  initPwaAndMobileConnect();
+  initAboutModal();
 
   // --- Engine Status Check ---
   async function checkEngineStatus() {
@@ -143,15 +155,23 @@ document.addEventListener('DOMContentLoaded', () => {
           engineStatusBadge.className = 'status-pill status-ready';
           engineStatusText.textContent = 'Microsoft Excel COM (PC)';
           engineStatusBadge.title = 'Menggunakan Microsoft Excel COM Native untuk hasil presisi 100%';
+        } else if (data.platform === 'Vercel Cloud' || window.location.hostname.includes('vercel.app')) {
+          engineStatusBadge.className = 'status-pill status-ready';
+          engineStatusText.textContent = 'Vercel Cloud (Online 24/7)';
+          engineStatusBadge.title = 'Server aktif di Vercel Cloud 24/7 tanpa butuh laptop menyala!';
         } else {
           engineStatusBadge.className = 'status-pill status-ready';
           engineStatusText.textContent = 'Engine Offline (Aktif)';
         }
       } else {
-        enableOfflineMode('Mode Standalone (Offline)');
+        enableOfflineMode('Cloud Mode (Client-Side)');
       }
     } catch (e) {
-      enableOfflineMode('Mode Standalone (Offline)');
+      if (window.location.hostname.includes('vercel.app')) {
+        enableOfflineMode('Vercel Cloud (Online 24/7)');
+      } else {
+        enableOfflineMode('Mode Standalone (Offline)');
+      }
     }
   }
 
@@ -181,6 +201,132 @@ document.addEventListener('DOMContentLoaded', () => {
     themeToggleBtn.innerHTML = theme === 'theme-dark' 
       ? '<i class="fa-solid fa-sun"></i>' 
       : '<i class="fa-solid fa-moon"></i>';
+  }
+
+  // --- Mobile Connect & PWA Setup ---
+  function initPwaAndMobileConnect() {
+    // 1. Register Service Worker for PWA (Installable on HP/Tablet)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('PWA Service Worker registered:', reg.scope))
+          .catch(err => console.warn('PWA SW error (ignored):', err));
+      });
+    }
+
+    // 2. Handle PWA Install Prompt (Chrome/Android)
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      if (installPwaBtn) {
+        installPwaBtn.classList.remove('hidden');
+      }
+    });
+
+    if (installPwaBtn) {
+      installPwaBtn.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          if (outcome === 'accepted') {
+            showToast('Aplikasi berhasil dipasang di layar utama!', 'success');
+            installPwaBtn.classList.add('hidden');
+          }
+          deferredPrompt = null;
+        } else {
+          showToast('Di HP: buka menu browser (titik 3) lalu pilih "Tambahkan ke Layar Utama"', 'info');
+        }
+      });
+    }
+
+    // 3. Fetch Network IP & Setup QR Code
+    let currentNetworkUrl = window.location.origin;
+    let qrGenerated = false;
+
+    async function fetchNetworkInfo() {
+      try {
+        const res = await fetch('/api/network-info');
+        if (res.ok) {
+          const info = await res.json();
+          currentNetworkUrl = info.network_url;
+          if (mobileUrlDisplay) {
+            mobileUrlDisplay.value = currentNetworkUrl;
+          }
+        }
+      } catch (err) {
+        if (mobileUrlDisplay) {
+          mobileUrlDisplay.value = window.location.href;
+        }
+      }
+    }
+    fetchNetworkInfo();
+
+    function renderQrCode() {
+      if (!qrcodeBox || typeof QRCode === 'undefined') return;
+      const targetUrl = (mobileUrlDisplay && mobileUrlDisplay.value) || currentNetworkUrl || window.location.href;
+      qrcodeBox.innerHTML = '';
+      try {
+        new QRCode(qrcodeBox, {
+          text: targetUrl,
+          width: 176,
+          height: 176,
+          colorDark: '#0f172a',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.M
+        });
+        qrGenerated = true;
+      } catch (e) {
+        console.warn('QR Code generation error:', e);
+      }
+    }
+
+    function openMobileModal() {
+      if (!mobileModalOverlay) return;
+      mobileModalOverlay.classList.remove('hidden');
+      if (!qrGenerated) {
+        renderQrCode();
+      }
+    }
+
+    function closeMobileModal() {
+      if (!mobileModalOverlay) return;
+      mobileModalOverlay.classList.add('hidden');
+    }
+
+    if (mobileConnectBtn) {
+      mobileConnectBtn.addEventListener('click', openMobileModal);
+    }
+    if (closeMobileModalBtn) {
+      closeMobileModalBtn.addEventListener('click', closeMobileModal);
+    }
+    if (mobileModalBackdrop) {
+      mobileModalBackdrop.addEventListener('click', closeMobileModal);
+    }
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && mobileModalOverlay && !mobileModalOverlay.classList.contains('hidden')) {
+        closeMobileModal();
+      }
+    });
+
+    // Copy URL Button
+    if (copyMobileUrlBtn && mobileUrlDisplay) {
+      copyMobileUrlBtn.addEventListener('click', async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(mobileUrlDisplay.value);
+          } else {
+            mobileUrlDisplay.select();
+            document.execCommand('copy');
+          }
+          showToast('Alamat URL berhasil disalin!', 'success');
+        } catch (e) {
+          showToast('Alamat URL: ' + mobileUrlDisplay.value, 'info');
+        }
+      });
+    }
   }
 
   // --- Toast Notifications ---
@@ -462,12 +608,39 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- Orientation Toggle ---
+  const orientationRadios = document.querySelectorAll('input[name="orientation"]');
+
+  function setOrientation(ori) {
+    if (!ori) ori = 'portrait';
+    ori = String(ori).trim().toLowerCase();
+    state.orientation = ori;
+
+    orientationCards.forEach(c => {
+      const radio = c.querySelector('input[type="radio"]');
+      const val = (c.dataset.orientation || (radio ? radio.value : '')).toLowerCase();
+      const isMatch = (val === ori);
+      c.classList.toggle('active', isMatch);
+      if (radio) radio.checked = isMatch;
+    });
+
+    updateVisualMockup();
+  }
+
   orientationCards.forEach(card => {
-    card.addEventListener('click', () => {
-      const ori = card.dataset.orientation;
-      state.orientation = ori;
-      orientationCards.forEach(c => c.classList.toggle('active', c.dataset.orientation === ori));
-      updateVisualMockup();
+    card.addEventListener('click', (e) => {
+      const radio = card.querySelector('input[type="radio"]');
+      const ori = card.dataset.orientation || (radio ? radio.value : null);
+      if (ori) {
+        setOrientation(ori);
+      }
+    });
+  });
+
+  orientationRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (radio.checked) {
+        setOrientation(radio.value);
+      }
     });
   });
 
@@ -484,6 +657,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Visual Margin Mockup Updater ---
   function updateVisualMockup() {
     const isLandscape = state.orientation === 'landscape';
+    paperMockup.classList.toggle('portrait-mode', !isLandscape);
+    paperMockup.classList.toggle('landscape-mode', isLandscape);
     paperMockup.classList.toggle('orientation-landscape', isLandscape);
 
     const topVal = parseFloat(marginTop.value) || 0;
@@ -491,7 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const leftVal = parseFloat(marginLeft.value) || 0;
     const rightVal = parseFloat(marginRight.value) || 0;
 
-    const cmMultiplier = 9;
+    const cmMultiplier = isLandscape ? 6.5 : 9;
     const unitScale = state.unit === 'inch' ? 2.54 : 1.0;
 
     const padTop = Math.min(Math.max(topVal * unitScale * cmMultiplier, 10), 80);
@@ -682,16 +857,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Share PDF Button ---
   if (sharePdfBtn) {
-    sharePdfBtn.addEventListener('click', () => {
+    sharePdfBtn.addEventListener('click', async () => {
       if (!state.convertedTask) {
         showToast('Belum ada dokumen PDF untuk dibagikan.', 'error');
         return;
       }
 
-      if (state.lastPdfBlob && window.OfflineConverter) {
-        window.OfflineConverter.sharePdf(state.lastPdfBlob, state.convertedTask.filename);
-      } else {
-        showToast('Gunakan tombol Unduh untuk menyimpan dokumen.', 'info');
+      try {
+        let blob = state.lastPdfBlob;
+        if (!blob && state.convertedTask.download_url) {
+          showToast('Menyiapkan file untuk dibagikan...', 'info');
+          const res = await fetch(state.convertedTask.download_url);
+          blob = await res.blob();
+          state.lastPdfBlob = blob;
+        }
+
+        if (blob && window.OfflineConverter) {
+          window.OfflineConverter.sharePdf(blob, state.convertedTask.filename);
+        } else {
+          showToast('Gunakan tombol Unduh untuk menyimpan dokumen.', 'info');
+        }
+      } catch (err) {
+        console.warn('Share error:', err);
+        showToast('Gagal membagikan: ' + err.message, 'error');
       }
     });
   }
@@ -753,6 +941,54 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyZoom() {
     zoomLevelText.textContent = `${state.zoomLevel}%`;
     previewImageWrapper.style.transform = `scale(${state.zoomLevel / 100})`;
+  }
+
+  // --- About / Tentang Sistem Modal ---
+  function initAboutModal() {
+    const aboutBtn = document.getElementById('aboutBtn');
+    const headerDevBadge = document.getElementById('headerDevBadge');
+    const aboutModalOverlay = document.getElementById('aboutModalOverlay');
+    const aboutModalBackdrop = document.getElementById('aboutModalBackdrop');
+    const closeAboutModalBtn = document.getElementById('closeAboutModalBtn');
+    const closeAboutModalBtn2 = document.getElementById('closeAboutModalBtn2');
+
+    if (!aboutModalOverlay) return;
+
+    function openAboutModal() {
+      aboutModalOverlay.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeAboutModal() {
+      aboutModalOverlay.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    if (aboutBtn) {
+      aboutBtn.addEventListener('click', openAboutModal);
+    }
+
+    if (headerDevBadge) {
+      headerDevBadge.addEventListener('click', openAboutModal);
+    }
+
+    if (closeAboutModalBtn) {
+      closeAboutModalBtn.addEventListener('click', closeAboutModal);
+    }
+
+    if (closeAboutModalBtn2) {
+      closeAboutModalBtn2.addEventListener('click', closeAboutModal);
+    }
+
+    if (aboutModalBackdrop) {
+      aboutModalBackdrop.addEventListener('click', closeAboutModal);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && aboutModalOverlay && !aboutModalOverlay.classList.contains('hidden')) {
+        closeAboutModal();
+      }
+    });
   }
 
   // --- Reset All Button ---

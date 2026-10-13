@@ -133,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkEngineStatus();
   updateVisualMockup();
   initPwaAndMobileConnect();
+  initAboutModal();
 
   // --- Engine Status Check ---
   async function checkEngineStatus() {
@@ -940,6 +941,54 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyZoom() {
     zoomLevelText.textContent = `${state.zoomLevel}%`;
     previewImageWrapper.style.transform = `scale(${state.zoomLevel / 100})`;
+  }
+
+  // --- About / Tentang Sistem Modal ---
+  function initAboutModal() {
+    const aboutBtn = document.getElementById('aboutBtn');
+    const headerDevBadge = document.getElementById('headerDevBadge');
+    const aboutModalOverlay = document.getElementById('aboutModalOverlay');
+    const aboutModalBackdrop = document.getElementById('aboutModalBackdrop');
+    const closeAboutModalBtn = document.getElementById('closeAboutModalBtn');
+    const closeAboutModalBtn2 = document.getElementById('closeAboutModalBtn2');
+
+    if (!aboutModalOverlay) return;
+
+    function openAboutModal() {
+      aboutModalOverlay.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeAboutModal() {
+      aboutModalOverlay.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    if (aboutBtn) {
+      aboutBtn.addEventListener('click', openAboutModal);
+    }
+
+    if (headerDevBadge) {
+      headerDevBadge.addEventListener('click', openAboutModal);
+    }
+
+    if (closeAboutModalBtn) {
+      closeAboutModalBtn.addEventListener('click', closeAboutModal);
+    }
+
+    if (closeAboutModalBtn2) {
+      closeAboutModalBtn2.addEventListener('click', closeAboutModal);
+    }
+
+    if (aboutModalBackdrop) {
+      aboutModalBackdrop.addEventListener('click', closeAboutModal);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && aboutModalOverlay && !aboutModalOverlay.classList.contains('hidden')) {
+        closeAboutModal();
+      }
+    });
   }
 
   // --- Reset All Button ---

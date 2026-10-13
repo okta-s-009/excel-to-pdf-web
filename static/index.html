@@ -43,6 +43,19 @@
       </div>
 
       <div class="header-actions">
+        <button id="aboutBtn" class="header-about-btn" title="Tentang Sistem (Profil Pengembang & Arsitektur)">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>Tentang Sistem</span>
+        </button>
+
+        <div id="headerDevBadge" class="header-dev-badge" title="Profil Pengembang & Tentang Sistem">
+          <span class="header-dev-avatar">OE</span>
+          <div class="header-dev-text">
+            <span class="header-dev-name">Oktavianus Eko Haryanto</span>
+            <span class="header-dev-role">FULLSTACK DEVELOPER</span>
+          </div>
+        </div>
+
         <button id="mobileConnectBtn" class="mobile-connect-btn" title="Buka di HP / Tablet (QR Code & Wi-Fi)">
           <i class="fa-solid fa-mobile-screen-button"></i>
           <span>Buka di HP / Tab</span>
@@ -596,6 +609,173 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- About / Tentang Sistem Modal (Identik dengan Referensi ERP) -->
+  <div id="aboutModalOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
+    <div class="modal-backdrop" id="aboutModalBackdrop"></div>
+    <div class="modal-card card-glass about-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-circle about-icon-circle">
+            <i class="fa-solid fa-circle-info"></i>
+          </div>
+          <div>
+            <h3 id="aboutModalTitle" class="modal-title">Tentang Sistem</h3>
+            <p class="modal-subtitle">Informasi arsitektur, pengembang, dan infrastruktur sistem</p>
+          </div>
+        </div>
+        <button id="closeAboutModalBtn" class="modal-close-btn" aria-label="Tutup Modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body about-modal-body">
+        <!-- Hero Banner: Identik dengan Box Web Accounting ERP di screenshot -->
+        <div class="about-hero-box">
+          <div class="about-hero-icon-box">
+            <i class="fa-solid fa-code"></i>
+          </div>
+          <div class="about-hero-content">
+            <h2 class="about-hero-title">Excel2PDF Studio</h2>
+            <p class="about-hero-desc">Sistem Otomasi dan Konversi Dokumen Excel ke PDF presisi tinggi yang dibangun untuk mengatur tata letak margin, orientasi kertas, multi-sheet, dan pratinjau real-time secara efisien, aman, dan modern.</p>
+            <div class="about-badges-row">
+              <span class="about-badge version"><i class="fa-solid fa-code-branch"></i> v2.0.0 (Production)</span>
+              <span class="about-badge security"><i class="fa-solid fa-shield-halved"></i> Secure Local & Client Engine</span>
+              <span class="about-badge offline"><i class="fa-solid fa-bolt"></i> Offline Ready</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 Columns Grid: Profil Pengembang & Teknologi -->
+        <div class="about-cards-grid">
+          <!-- Card 1: Profil Pengembang -->
+          <div class="about-card dev-card">
+            <div class="about-card-header">
+              <i class="fa-solid fa-user-gear"></i>
+              <h4>Profil Pengembang</h4>
+            </div>
+            <div class="about-dev-profile-row">
+              <div class="about-dev-avatar-lg">
+                <span>OE</span>
+              </div>
+              <div class="about-dev-profile-meta">
+                <h5 class="about-dev-profile-name">Oktavianus Eko Haryanto</h5>
+                <span class="about-dev-profile-role">FULL STACK DEVELOPER</span>
+              </div>
+            </div>
+            <p class="about-dev-bio">Arsitek dan pengembang utama di balik sistem Excel2PDF Studio ini. Mengkhususkan diri dalam pengembangan antarmuka web modern, manajemen state aplikasi yang kompleks, dan sistem otomasi konversi dokumen presisi tinggi (desktop & cloud automation).</p>
+            <div class="about-contact-grid">
+              <a href="mailto:oktavianus.eko11@gmail.com" class="about-contact-btn email-btn" title="Kirim Email">
+                <div class="contact-bubble-icon email">
+                  <i class="fa-solid fa-envelope"></i>
+                </div>
+                <div class="contact-btn-meta">
+                  <span class="contact-btn-label">EMAIL</span>
+                  <span class="contact-btn-val">oktavianus.eko11@gm...</span>
+                </div>
+              </a>
+              <a href="https://wa.me/6289661120396" target="_blank" rel="noopener noreferrer" class="about-contact-btn whatsapp-btn" title="Chat via WhatsApp">
+                <div class="contact-bubble-icon whatsapp">
+                  <i class="fa-brands fa-whatsapp"></i>
+                </div>
+                <div class="contact-btn-meta">
+                  <span class="contact-btn-label">WHATSAPP</span>
+                  <span class="contact-btn-val">0896-6112-0396</span>
+                </div>
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 2: Teknologi & Infrastruktur -->
+          <div class="about-card tech-card">
+            <div class="about-card-header">
+              <i class="fa-solid fa-microchip"></i>
+              <h4>Teknologi & Infrastruktur</h4>
+            </div>
+            <ul class="about-tech-items">
+              <li>
+                <span class="tech-glow-dot indigo"></span>
+                <div class="tech-item-body">
+                  <strong>Python 3 & FastAPI Engine</strong>
+                  <p>Backend server modern berbasis asynchronous ASGI yang menangani pemrosesan file, inspeksi sheet, dan antrean konversi dokumen secepat kilat.</p>
+                </div>
+              </li>
+              <li>
+                <span class="tech-glow-dot emerald"></span>
+                <div class="tech-item-body">
+                  <strong>Microsoft Excel COM Automation</strong>
+                  <p>Integrasi native COM Office untuk hasil cetak PDF dengan presisi margin, font, dan rumus 100% identik dengan aplikasi desktop.</p>
+                </div>
+              </li>
+              <li>
+                <span class="tech-glow-dot cyan"></span>
+                <div class="tech-item-body">
+                  <strong>Client-Side Engine (SheetJS + jsPDF)</strong>
+                  <p>Mesin konversi mandiri berbasis peramban (browser) yang memungkinkan pemrosesan dokumen secara offline 100% tanpa delay server.</p>
+                </div>
+              </li>
+              <li>
+                <span class="tech-glow-dot purple"></span>
+                <div class="tech-item-body">
+                  <strong>PWA & Android Capacitor Framework</strong>
+                  <p>Arsitektur Progressive Web App responsif yang dapat diakses langsung dari browser HP/Tablet maupun di-compile menjadi file APK Android mandiri.</p>
+                </div>
+              </li>
+            </ul>
+            <div class="about-card-footer-note">
+              <span>Sistem dirancang secara khusus untuk kelancaran bisnis Anda</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Manajemen Penyimpanan & Keamanan -->
+        <div class="about-card storage-card">
+          <div class="about-card-header">
+            <i class="fa-solid fa-database"></i>
+            <div>
+              <h4>Manajemen Penyimpanan & Keamanan</h4>
+              <p class="storage-subheading">Cadangkan, konversi, dan lindungi dokumen penting Anda dengan aman.</p>
+            </div>
+          </div>
+          <div class="about-storage-grid">
+            <div class="storage-item">
+              <div class="storage-item-icon"><i class="fa-solid fa-shield-halved"></i></div>
+              <div class="storage-item-text">
+                <strong>100% Client Privacy</strong>
+                <p>Dokumen Anda diproses secara privat dan tidak disimpan permanen di database publik.</p>
+              </div>
+            </div>
+            <div class="storage-item">
+              <div class="storage-item-icon"><i class="fa-solid fa-broom"></i></div>
+              <div class="storage-item-text">
+                <strong>Pembersihan Otomatis</strong>
+                <p>Berkas sementara (temporary upload & preview) otomatis dihapus berkala oleh sistem.</p>
+              </div>
+            </div>
+            <div class="storage-item">
+              <div class="storage-item-icon"><i class="fa-solid fa-bolt"></i></div>
+              <div class="storage-item-text">
+                <strong>Multi-Engine Cerdas</strong>
+                <p>Otomatis beralih ke Mode Offline (SheetJS) jika server COM Excel tidak terpasang.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer about-modal-footer">
+        <div class="about-modal-footer-brand">
+          <span class="brand-text-sm">EXCEL2PDF STUDIO</span>
+          <span class="brand-sub-sm">Versi 2.0.0 (Production) &bull; Mode Standalone & Cloud</span>
+        </div>
+        <button id="closeAboutModalBtn2" class="btn btn-secondary close-about-footer-btn">
+          <i class="fa-solid fa-check"></i>
+          <span>Tutup</span>
+        </button>
       </div>
     </div>
   </div>

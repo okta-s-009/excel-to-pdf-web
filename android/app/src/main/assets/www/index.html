@@ -43,6 +43,27 @@
       </div>
 
       <div class="header-actions">
+        <button id="aboutBtn" class="header-about-btn" title="Tentang Sistem (Profil Pengembang & Arsitektur)">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>Tentang Sistem</span>
+        </button>
+
+        <div id="headerDevBadge" class="header-dev-badge" title="Profil Pengembang & Tentang Sistem">
+          <span class="header-dev-avatar">OE</span>
+          <div class="header-dev-text">
+            <span class="header-dev-name">Oktavianus Eko Haryanto</span>
+            <span class="header-dev-role">FULLSTACK DEVELOPER</span>
+          </div>
+        </div>
+
+        <button id="mobileConnectBtn" class="mobile-connect-btn" title="Buka di HP / Tablet (QR Code & Wi-Fi)">
+          <i class="fa-solid fa-mobile-screen-button"></i>
+          <span>Buka di HP / Tab</span>
+        </button>
+        <button id="installPwaBtn" class="install-pwa-btn hidden" title="Pasang Aplikasi ke Layar Utama HP">
+          <i class="fa-solid fa-circle-arrow-down"></i>
+          <span>Pasang App</span>
+        </button>
         <div id="engineStatusBadge" class="status-pill status-ready" title="Status Engine Microsoft Excel">
           <span class="status-dot"></span>
           <span id="engineStatusText">Memeriksa Engine...</span>
@@ -78,8 +99,8 @@
               <div class="upload-icon-pulse">
                 <i class="fa-solid fa-cloud-arrow-up"></i>
               </div>
-              <h3 class="dropzone-title">Tarik & Letakkan file Excel di sini</h3>
-              <p class="dropzone-desc">atau <span class="browse-link">Telusuri dari Komputer</span></p>
+              <h3 class="dropzone-title">Pilih atau Tarik File Excel ke Sini</h3>
+              <p class="dropzone-desc">Sentuh untuk <span class="browse-link">Telusuri File dari HP / Komputer</span></p>
               <div class="dropzone-badges">
                 <span class="filetype-badge">XLSX</span>
                 <span class="filetype-badge">XLS</span>
@@ -254,16 +275,16 @@
           <div class="form-group">
             <label class="form-label"><i class="fa-solid fa-compass"></i> Orientasi Halaman:</label>
             <div class="orientation-switch-grid">
-              <label class="orientation-card active">
-                <input type="radio" name="orientation" value="portrait" checked class="sr-only">
+              <label class="orientation-card active" data-orientation="portrait">
+                <input type="radio" name="orientation" id="orientationPortrait" value="portrait" checked class="sr-only">
                 <div class="orient-preview portrait-box"></div>
                 <div class="orient-text">
                   <span class="orient-title">Portrait</span>
                   <span class="orient-sub">Tegak (Standar)</span>
                 </div>
               </label>
-              <label class="orientation-card">
-                <input type="radio" name="orientation" value="landscape" class="sr-only">
+              <label class="orientation-card" data-orientation="landscape">
+                <input type="radio" name="orientation" id="orientationLandscape" value="landscape" class="sr-only">
                 <div class="orient-preview landscape-box"></div>
                 <div class="orient-text">
                   <span class="orient-title">Landscape</span>
@@ -528,6 +549,237 @@
     </div>
   </main>
 
+  <!-- Modal Buka di HP / Tablet -->
+  <div id="mobileModalOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mobileModalTitle">
+    <div class="modal-backdrop" id="mobileModalBackdrop"></div>
+    <div class="modal-card card-glass">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-circle">
+            <i class="fa-solid fa-mobile-screen-button"></i>
+          </div>
+          <div>
+            <h3 id="mobileModalTitle" class="modal-title">Buka di HP atau Tablet</h3>
+            <p class="modal-subtitle">Gunakan aplikasi langsung dari browser HP tanpa file APK</p>
+          </div>
+        </div>
+        <button id="closeMobileModalBtn" class="modal-close-btn" aria-label="Tutup Modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <!-- QR Code Section -->
+        <div class="qr-box-wrap">
+          <div id="qrcodeBox" class="qrcode-canvas-box"></div>
+          <p class="qr-caption">
+            <i class="fa-solid fa-camera"></i> Pindai QR Code ini dengan Kamera HP / Tablet
+          </p>
+        </div>
+
+        <!-- Connection Instructions -->
+        <div class="connect-guide-wrap">
+          <div class="guide-item">
+            <span class="guide-badge">1</span>
+            <div class="guide-text">
+              <strong>Sambungkan ke Wi-Fi yang Sama</strong>
+              <p>Pastikan HP atau Tablet terhubung ke jaringan Wi-Fi yang sama dengan komputer ini.</p>
+            </div>
+          </div>
+
+          <div class="guide-item">
+            <span class="guide-badge">2</span>
+            <div class="guide-text">
+              <strong>Buka Browser di HP (Chrome / Safari)</strong>
+              <p>Ketik alamat IP berikut di address bar browser HP Anda:</p>
+              <div class="copy-url-group">
+                <input type="text" id="mobileUrlDisplay" readonly value="http://localhost:8000" class="mobile-url-input">
+                <button id="copyMobileUrlBtn" class="copy-btn" title="Salin Alamat">
+                  <i class="fa-solid fa-copy"></i> <span>Salin</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="guide-item">
+            <span class="guide-badge">3</span>
+            <div class="guide-text">
+              <strong>Jadikan Aplikasi di Layar Utama HP</strong>
+              <p>Di browser HP, klik menu <b>(⋮)</b> atau tombol Bagikan, lalu pilih <i>"Tambahkan ke Layar Utama" (Add to Home screen)</i> untuk membukanya seperti aplikasi biasa!</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- About / Tentang Sistem Modal (Identik dengan Referensi ERP) -->
+  <div id="aboutModalOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
+    <div class="modal-backdrop" id="aboutModalBackdrop"></div>
+    <div class="modal-card card-glass about-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-circle about-icon-circle">
+            <i class="fa-solid fa-circle-info"></i>
+          </div>
+          <div>
+            <h3 id="aboutModalTitle" class="modal-title">Tentang Sistem</h3>
+            <p class="modal-subtitle">Informasi arsitektur, pengembang, dan infrastruktur sistem</p>
+          </div>
+        </div>
+        <button id="closeAboutModalBtn" class="modal-close-btn" aria-label="Tutup Modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body about-modal-body">
+        <!-- Hero Banner: Identik dengan Box Web Accounting ERP di screenshot -->
+        <div class="about-hero-box">
+          <div class="about-hero-icon-box">
+            <i class="fa-solid fa-code"></i>
+          </div>
+          <div class="about-hero-content">
+            <h2 class="about-hero-title">Excel2PDF Studio</h2>
+            <p class="about-hero-desc">Sistem Otomasi dan Konversi Dokumen Excel ke PDF presisi tinggi yang dibangun untuk mengatur tata letak margin, orientasi kertas, multi-sheet, dan pratinjau real-time secara efisien, aman, dan modern.</p>
+            <div class="about-badges-row">
+              <span class="about-badge version"><i class="fa-solid fa-code-branch"></i> v2.0.0 (Production)</span>
+              <span class="about-badge security"><i class="fa-solid fa-shield-halved"></i> Secure Local & Client Engine</span>
+              <span class="about-badge offline"><i class="fa-solid fa-bolt"></i> Offline Ready</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 Columns Grid: Profil Pengembang & Teknologi -->
+        <div class="about-cards-grid">
+          <!-- Card 1: Profil Pengembang -->
+          <div class="about-card dev-card">
+            <div class="about-card-header">
+              <i class="fa-solid fa-user-gear"></i>
+              <h4>Profil Pengembang</h4>
+            </div>
+            <div class="about-dev-profile-row">
+              <div class="about-dev-avatar-lg">
+                <span>OE</span>
+              </div>
+              <div class="about-dev-profile-meta">
+                <h5 class="about-dev-profile-name">Oktavianus Eko Haryanto</h5>
+                <span class="about-dev-profile-role">FULL STACK DEVELOPER</span>
+              </div>
+            </div>
+            <p class="about-dev-bio">Arsitek dan pengembang utama di balik sistem Excel2PDF Studio ini. Mengkhususkan diri dalam pengembangan antarmuka web modern, manajemen state aplikasi yang kompleks, dan sistem otomasi konversi dokumen presisi tinggi (desktop & cloud automation).</p>
+            <div class="about-contact-grid">
+              <a href="mailto:oktavianus.eko11@gmail.com" class="about-contact-btn email-btn" title="Kirim Email">
+                <div class="contact-bubble-icon email">
+                  <i class="fa-solid fa-envelope"></i>
+                </div>
+                <div class="contact-btn-meta">
+                  <span class="contact-btn-label">EMAIL</span>
+                  <span class="contact-btn-val">oktavianus.eko11@gm...</span>
+                </div>
+              </a>
+              <a href="https://wa.me/6289661120396" target="_blank" rel="noopener noreferrer" class="about-contact-btn whatsapp-btn" title="Chat via WhatsApp">
+                <div class="contact-bubble-icon whatsapp">
+                  <i class="fa-brands fa-whatsapp"></i>
+                </div>
+                <div class="contact-btn-meta">
+                  <span class="contact-btn-label">WHATSAPP</span>
+                  <span class="contact-btn-val">0896-6112-0396</span>
+                </div>
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 2: Teknologi & Infrastruktur -->
+          <div class="about-card tech-card">
+            <div class="about-card-header">
+              <i class="fa-solid fa-microchip"></i>
+              <h4>Teknologi & Infrastruktur</h4>
+            </div>
+            <ul class="about-tech-items">
+              <li>
+                <span class="tech-glow-dot indigo"></span>
+                <div class="tech-item-body">
+                  <strong>Python 3 & FastAPI Engine</strong>
+                  <p>Backend server modern berbasis asynchronous ASGI yang menangani pemrosesan file, inspeksi sheet, dan antrean konversi dokumen secepat kilat.</p>
+                </div>
+              </li>
+              <li>
+                <span class="tech-glow-dot emerald"></span>
+                <div class="tech-item-body">
+                  <strong>Microsoft Excel COM Automation</strong>
+                  <p>Integrasi native COM Office untuk hasil cetak PDF dengan presisi margin, font, dan rumus 100% identik dengan aplikasi desktop.</p>
+                </div>
+              </li>
+              <li>
+                <span class="tech-glow-dot cyan"></span>
+                <div class="tech-item-body">
+                  <strong>Client-Side Engine (SheetJS + jsPDF)</strong>
+                  <p>Mesin konversi mandiri berbasis peramban (browser) yang memungkinkan pemrosesan dokumen secara offline 100% tanpa delay server.</p>
+                </div>
+              </li>
+              <li>
+                <span class="tech-glow-dot purple"></span>
+                <div class="tech-item-body">
+                  <strong>PWA & Android Capacitor Framework</strong>
+                  <p>Arsitektur Progressive Web App responsif yang dapat diakses langsung dari browser HP/Tablet maupun di-compile menjadi file APK Android mandiri.</p>
+                </div>
+              </li>
+            </ul>
+            <div class="about-card-footer-note">
+              <span>Sistem dirancang secara khusus untuk kelancaran bisnis Anda</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Manajemen Penyimpanan & Keamanan -->
+        <div class="about-card storage-card">
+          <div class="about-card-header">
+            <i class="fa-solid fa-database"></i>
+            <div>
+              <h4>Manajemen Penyimpanan & Keamanan</h4>
+              <p class="storage-subheading">Cadangkan, konversi, dan lindungi dokumen penting Anda dengan aman.</p>
+            </div>
+          </div>
+          <div class="about-storage-grid">
+            <div class="storage-item">
+              <div class="storage-item-icon"><i class="fa-solid fa-shield-halved"></i></div>
+              <div class="storage-item-text">
+                <strong>100% Client Privacy</strong>
+                <p>Dokumen Anda diproses secara privat dan tidak disimpan permanen di database publik.</p>
+              </div>
+            </div>
+            <div class="storage-item">
+              <div class="storage-item-icon"><i class="fa-solid fa-broom"></i></div>
+              <div class="storage-item-text">
+                <strong>Pembersihan Otomatis</strong>
+                <p>Berkas sementara (temporary upload & preview) otomatis dihapus berkala oleh sistem.</p>
+              </div>
+            </div>
+            <div class="storage-item">
+              <div class="storage-item-icon"><i class="fa-solid fa-bolt"></i></div>
+              <div class="storage-item-text">
+                <strong>Multi-Engine Cerdas</strong>
+                <p>Otomatis beralih ke Mode Offline (SheetJS) jika server COM Excel tidak terpasang.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer about-modal-footer">
+        <div class="about-modal-footer-brand">
+          <span class="brand-text-sm">EXCEL2PDF STUDIO</span>
+          <span class="brand-sub-sm">Versi 2.0.0 (Production) &bull; Mode Standalone & Cloud</span>
+        </div>
+        <button id="closeAboutModalBtn2" class="btn btn-secondary close-about-footer-btn">
+          <i class="fa-solid fa-check"></i>
+          <span>Tutup</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Notification Toast Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
@@ -547,6 +799,7 @@
   </div>
 
   <!-- Offline Engine Libraries -->
+  <script src="libs/qrcode.min.js"></script>
   <script src="libs/xlsx.full.min.js"></script>
   <script src="libs/jspdf.umd.min.js"></script>
   <script src="libs/jspdf.plugin.autotable.min.js"></script>
