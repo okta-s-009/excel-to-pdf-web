@@ -425,12 +425,14 @@
      * Generates visual page preview thumbnails from PDF buffer using PDF.js.
      */
     generatePreviews: async function (pdfArrayBuffer, maxPages = 1) {
-      if (!window.pdfjsLib) {
+      if (!window.pdfjsLib || !pdfArrayBuffer) {
         return { total_pages: 1, previews: [] };
       }
 
       try {
-        const loadingTask = window.pdfjsLib.getDocument({ data: pdfArrayBuffer });
+        // ALWAYS pass a cloned copy as Uint8Array so PDF.js Web Worker never detaches original ArrayBuffer
+        const bufferCopy = pdfArrayBuffer.slice ? pdfArrayBuffer.slice(0) : new Uint8Array(pdfArrayBuffer).buffer.slice(0);
+        const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(bufferCopy) });
         const pdf = await loadingTask.promise;
         const totalPages = pdf.numPages;
         const pagesToRender = Math.min(totalPages, maxPages);
@@ -462,9 +464,10 @@
      * Renders a single specific page on demand.
      */
     renderSinglePage: async function (pdfArrayBuffer, pageNumber) {
-      if (!window.pdfjsLib) return null;
+      if (!window.pdfjsLib || !pdfArrayBuffer) return null;
       try {
-        const loadingTask = window.pdfjsLib.getDocument({ data: pdfArrayBuffer });
+        const bufferCopy = pdfArrayBuffer.slice ? pdfArrayBuffer.slice(0) : new Uint8Array(pdfArrayBuffer).buffer.slice(0);
+        const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(bufferCopy) });
         const pdf = await loadingTask.promise;
         if (pageNumber < 1 || pageNumber > pdf.numPages) return null;
 
@@ -505,16 +508,33 @@
         return;
       }
 
-      const url = URL.createObjectURL(pdfBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 1000);
+      // Safe, robust browser download
+      try {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = filename || 'dokumen.pdf';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          // Keep object URL alive for 60 seconds so repeated clicks or download managers work
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }, 100);
+      } catch (err) {
+        console.warn('Download fallback trigger:', err);
+        const reader = new FileReader();
+        reader.onloadend = function () {
+          const a = document.createElement('a');
+          a.href = reader.result;
+          a.download = filename || 'dokumen.pdf';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        };
+        reader.readAsDataURL(pdfBlob);
+      }
     },
 
     /**

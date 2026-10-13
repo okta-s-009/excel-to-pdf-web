@@ -1,4 +1,4 @@
-const CACHE_NAME = 'excel2pdf-cache-v7';
+const CACHE_NAME = 'excel2pdf-cache-v8';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

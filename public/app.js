@@ -938,11 +938,11 @@ document.addEventListener('DOMContentLoaded', () => {
     resPdfPages.textContent = `${data.total_pages} Halaman`;
     resPdfDuration.textContent = `${data.duration_seconds}s`;
 
-    downloadPdfBtn.href = data.download_url;
+    downloadPdfBtn.href = data.download_url || '#';
     downloadPdfBtn.setAttribute('download', data.filename);
-    openTabPdfBtn.href = data.view_url;
+    openTabPdfBtn.href = data.view_url || '#';
 
-    // Direct download click handling
+    // Robust download click handling
     downloadPdfBtn.onclick = (e) => {
       if (state.lastPdfBlob && window.OfflineConverter) {
         e.preventDefault();
