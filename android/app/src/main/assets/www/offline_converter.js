@@ -1,7 +1,17 @@
 /**
- * Excel2PDF Studio - Offline Client-Side Conversion Engine
- * Runs 100% locally in the browser or inside an Android WebView APK.
- * Uses: SheetJS (xlsx), jsPDF, jsPDF-AutoTable, and PDF.js
+ * Excel2PDF Studio - Offline Client-Side Conversion Engine v3.5
+ * ============================================================
+ * High-performance, pixel-accurate Excel-to-PDF conversion running
+ * 100% in the browser (and inside Android APK) using SheetJS + jsPDF + AutoTable.
+ *
+ * Specially engineered for wide government / contractor spreadsheets (e.g. RAB):
+ *   - Auto-detects and extracts document title blocks above tables
+ *   - Accurately maps SheetJS merged cells (colSpan & rowSpan)
+ *   - Automatic multi-level header recognition
+ *   - Auto-landscape switching for wide spreadsheets (>7 columns)
+ *   - Dynamic scale-to-fit: fits all columns cleanly across page width
+ *   - Number & currency right-alignment, index centering
+ *   - Razor-sharp vector output with selectable text & pagination
  */
 
 (function (window) {
@@ -10,8 +20,8 @@
   // Configure PDF.js worker if available
   if (window.pdfjsLib) {
     const isStatic = window.location.pathname.startsWith('/static');
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = isStatic 
-      ? '/static/libs/pdf.worker.min.js' 
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = isStatic
+      ? '/static/libs/pdf.worker.min.js'
       : 'libs/pdf.worker.min.js';
   }
 
@@ -56,7 +66,7 @@
       }
 
       const buffer = await file.arrayBuffer();
-      const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: true });
+      const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: true, cellStyles: true });
       const sheets = workbook.SheetNames || [];
       const details = [];
 
@@ -66,8 +76,8 @@
         let maxCol = 0;
         if (ws && ws['!ref']) {
           const range = window.XLSX.utils.decode_range(ws['!ref']);
-          maxRow = range.e.r + 1;
-          maxCol = range.e.c + 1;
+          maxRow = range.e.r - range.s.r + 1;
+          maxCol = range.e.c - range.s.c + 1;
         }
         details.push({
           name: name,
@@ -83,14 +93,12 @@
         filesize_formatted: formatBytes(file.size),
         sheets: sheets,
         details: details,
-        workbook: workbook // cached in memory for immediate conversion
+        workbook: workbook
       };
     },
 
     /**
      * Converts Excel workbook to PDF client-side.
-     * Enhanced: Smart title detection, auto-landscape, content-weighted columns,
-     * Excel-like header styling, and number/currency right-alignment.
      */
     convertToPdf: async function (fileOrWorkbook, options) {
       if (!this.isReady()) {
@@ -127,13 +135,10 @@
       let orientation = (options.orientation || 'portrait').toLowerCase();
       const paperSizeName = options.paper_size || 'A4';
       const paperDim = PAPER_DIMENSIONS_MM[paperSizeName] || PAPER_DIMENSIONS_MM.A4;
-
-      const fitMode = options.fit_mode || 'fit_width';
-      const showGridlines = Boolean(options.show_gridlines);
-      const showHeadings = Boolean(options.show_headings);
+      const showGridlines = options.show_gridlines !== false;
       const selectedSheet = options.sheet_name || 'all';
 
-      // --- Pre-scan all sheets to detect max columns for auto-landscape ---
+      // Sheets selection
       let sheetsToRender = [];
       if (selectedSheet !== 'all' && workbook.Sheets[selectedSheet]) {
         sheetsToRender.push(selectedSheet);
@@ -141,31 +146,29 @@
         sheetsToRender = workbook.SheetNames || [];
       }
 
+      // Pre-scan all sheets to find global max columns for auto-landscape
       let globalMaxCols = 0;
-      const sheetDataCache = {};
       for (const sName of sheetsToRender) {
         const ws = workbook.Sheets[sName];
         if (!ws || !ws['!ref']) continue;
-        const rawData = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
-        if (!rawData || rawData.length === 0) continue;
-        let cleanRows = rawData.filter(row => row.some(cell => String(cell).trim() !== ''));
-        if (cleanRows.length === 0) continue;
-        let maxCols = 0;
-        cleanRows.forEach(r => { if (r.length > maxCols) maxCols = r.length; });
-        if (maxCols > globalMaxCols) globalMaxCols = maxCols;
-        sheetDataCache[sName] = { cleanRows, maxCols };
+        const range = window.XLSX.utils.decode_range(ws['!ref']);
+        const cols = range.e.c - range.s.c + 1;
+        if (cols > globalMaxCols) globalMaxCols = cols;
       }
 
-      // AUTO-LANDSCAPE: If user chose portrait but table has > 7 columns, auto-switch to landscape
-      if (orientation === 'portrait' && globalMaxCols > 7) {
+      // Auto-switch to landscape if user selected portrait but spreadsheet is wide (>7 cols)
+      const autoLandscapeTriggered = orientation === 'portrait' && globalMaxCols > 7;
+      if (autoLandscapeTriggered) {
         orientation = 'landscape';
       }
 
       const pageWidth = orientation === 'landscape' ? paperDim.height : paperDim.width;
       const pageHeight = orientation === 'landscape' ? paperDim.width : paperDim.height;
+      const printableWidth = Math.max(pageWidth - leftMm - rightMm, 40);
 
       // Initialize jsPDF
-      const { jsPDF } = window.jspdf || window;
+      const jspdfModule = window.jspdf || window;
+      const { jsPDF } = jspdfModule;
       const doc = new jsPDF({
         orientation: orientation === 'landscape' ? 'landscape' : 'portrait',
         unit: 'mm',
@@ -173,334 +176,233 @@
         compress: true
       });
 
-      // Printable usable width & height in mm
-      const printableWidth = Math.max(pageWidth - leftMm - rightMm, 20);
+      // Ensure AutoTable plugin is attached
+      if (!doc.autoTable && window.jspdf && window.jspdf.plugin && window.jspdf.plugin.autotable) {
+        window.jspdf.plugin.autotable.applyPlugin(jsPDF);
+      }
 
       let isFirstTable = true;
 
       for (let sIdx = 0; sIdx < sheetsToRender.length; sIdx++) {
         const sName = sheetsToRender[sIdx];
-        const cached = sheetDataCache[sName];
-        if (!cached) continue;
+        const ws = workbook.Sheets[sName];
+        if (!ws || !ws['!ref']) continue;
 
-        let cleanRows = cached.cleanRows;
-        let maxCols = cached.maxCols;
+        const range = window.XLSX.utils.decode_range(ws['!ref']);
+        const totalCols = range.e.c - range.s.c + 1;
+        const totalRows = range.e.r - range.s.r + 1;
+        if (totalCols === 0 || totalRows === 0) continue;
 
-        // Ensure every row has maxCols entries
-        cleanRows = cleanRows.map(row => {
-          const filled = [...row];
-          while (filled.length < maxCols) filled.push('');
-          return filled;
-        });
-
-        // ======= SMART TITLE ROW DETECTION =======
-        // Scan the first few rows: if a row has <= 2 filled cells and long text (>20 chars),
-        // it is a title/subtitle row. Extract these and render as centered text above the table.
-        const titleLines = [];
-        let dataStartIdx = 0;
-
-        for (let ri = 0; ri < Math.min(cleanRows.length, 5); ri++) {
-          const row = cleanRows[ri];
-          const filledCells = row.filter(c => String(c).trim() !== '');
-          const filledCount = filledCells.length;
-          const longestCell = filledCells.reduce((max, c) => Math.max(max, String(c).length), 0);
-
-          // Title criteria: very few filled cells (1-2) AND at least one has long text
-          // OR the row is completely empty (spacer row between title and data)
-          if (filledCount === 0) {
-            // Empty spacer row - skip it but keep scanning
-            dataStartIdx = ri + 1;
-            continue;
+        // 1. Build lookup of merged cells by absolute row (r) and col (c)
+        const merges = ws['!merges'] || [];
+        const mergeMap = {};
+        for (const m of merges) {
+          const rs = m.e.r - m.s.r + 1;
+          const cs = m.e.c - m.s.c + 1;
+          for (let r = m.s.r; r <= m.e.r; r++) {
+            if (!mergeMap[r]) mergeMap[r] = {};
+            for (let c = m.s.c; c <= m.e.c; c++) {
+              if (r === m.s.r && c === m.s.c) {
+                mergeMap[r][c] = { rs, cs, origin: true };
+              } else {
+                mergeMap[r][c] = { skip: true };
+              }
+            }
           }
-          if (filledCount <= 3 && maxCols > 3) {
-            // This is a title row
-            const titleText = filledCells.join(' ').trim();
-            titleLines.push(titleText);
-            dataStartIdx = ri + 1;
+        }
+
+        // 2. Separate Title rows from Table rows
+        // Title rows: early rows with <= 3 filled cells in wide sheets
+        const titleLines = [];
+        let tableStartR = range.s.r;
+
+        for (let r = range.s.r; r <= range.e.r; r++) {
+          const filled = [];
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const addr = window.XLSX.utils.encode_cell({ r, c });
+            const cell = ws[addr];
+            if (cell && cell.w !== undefined && String(cell.w).trim() !== '') {
+              filled.push(String(cell.w).trim());
+            } else if (cell && cell.v !== undefined && String(cell.v).trim() !== '') {
+              filled.push(String(cell.v).trim());
+            }
+          }
+
+          if (filled.length === 0) {
+            continue; // Skip blank spacing row
+          }
+
+          if (filled.length <= 3 && totalCols > 4 && r < range.s.r + 6) {
+            titleLines.push(filled.join(' - '));
           } else {
-            // Real data starts here
+            tableStartR = r;
             break;
           }
         }
 
-        // Separate actual data rows (after title rows)
-        const dataRows = cleanRows.slice(dataStartIdx);
-        if (dataRows.length === 0) continue;
-
-        // ======= HEADER & BODY SEPARATION =======
-        let headerRow = null;
-        let bodyRows = dataRows;
-        let multiRowHeader = [];
-
-        if (showHeadings) {
-          const colLetters = ['#'];
-          for (let c = 0; c < maxCols; c++) {
-            colLetters.push(window.XLSX.utils.encode_col(c));
-          }
-          headerRow = colLetters;
-          bodyRows = dataRows.map((r, rIdx) => [String(rIdx + 1), ...r]);
-          maxCols += 1;
-        } else {
-          // Detect multi-row headers: consecutive rows where most cells contain short text
-          // and no cells look like pure numbers
-          let headerEndIdx = 0;
-          for (let ri = 0; ri < Math.min(dataRows.length, 4); ri++) {
-            const row = dataRows[ri];
-            const filledCells = row.filter(c => String(c).trim() !== '');
-            const filledRatio = filledCells.length / maxCols;
-            // Header rows typically have > 40% filled cells and mostly short text
-            const avgLen = filledCells.reduce((s, c) => s + String(c).length, 0) / (filledCells.length || 1);
-            const hasNumbers = filledCells.some(c => /^\d+[\d.,]*$/.test(String(c).trim()) && String(c).trim().length > 2);
-            
-            if (ri === 0 && filledRatio > 0.3) {
-              // First row is always treated as header if it has enough content
-              headerEndIdx = ri + 1;
-            } else if (ri > 0 && filledRatio > 0.3 && avgLen < 30 && !hasNumbers) {
-              // Subsequent header row (sub-headers like "Volume" spanning columns)
-              headerEndIdx = ri + 1;
-            } else {
-              break;
-            }
-          }
-
-          if (headerEndIdx > 0 && dataRows.length > headerEndIdx) {
-            if (headerEndIdx === 1) {
-              headerRow = dataRows[0];
-              bodyRows = dataRows.slice(1);
-            } else {
-              // Multi-row header
-              multiRowHeader = dataRows.slice(0, headerEndIdx);
-              bodyRows = dataRows.slice(headerEndIdx);
-            }
-          } else {
-            headerRow = null;
-            bodyRows = dataRows;
+        // 3. Determine number of header rows (e.g. multi-tier headers)
+        let headerRowsCount = 1;
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const m = (mergeMap[tableStartR] && mergeMap[tableStartR][c]) || null;
+          if (m && m.origin && m.rs > headerRowsCount) {
+            headerRowsCount = m.rs;
           }
         }
 
-        // ======= COLUMN TYPE DETECTION (for alignment & width weighting) =======
-        const colMeta = [];
-        for (let c = 0; c < maxCols; c++) {
-          let numCount = 0;
-          let textCount = 0;
-          let maxTextLen = 0;
-          let totalLen = 0;
-          let sampleCount = 0;
-          let isCurrency = false;
-
-          // Sample from body rows
-          const samplesToCheck = Math.min(bodyRows.length, 30);
-          for (let r = 0; r < samplesToCheck; r++) {
-            const val = String(bodyRows[r][c] || '').trim();
-            if (val === '') continue;
-            sampleCount++;
-            totalLen += val.length;
-            if (val.length > maxTextLen) maxTextLen = val.length;
-
-            // Check if it looks like a number or currency
-            const cleanVal = val.replace(/[Rp.,\s]/g, '');
-            if (/^-?\d+$/.test(cleanVal) && cleanVal.length > 0) {
-              numCount++;
-              if (/Rp|rupiah/i.test(val) || /^\d{1,3}([.,]\d{3})+/.test(val) || val.includes('.000')) {
-                isCurrency = true;
-              }
-            } else {
-              textCount++;
-            }
-          }
-
-          const avgLen = sampleCount > 0 ? totalLen / sampleCount : 5;
-          const isNumeric = sampleCount > 0 && numCount / sampleCount > 0.6;
-          const isIndex = maxTextLen <= 4 && isNumeric;
-
-          colMeta.push({
-            isNumeric,
-            isIndex,
-            isCurrency,
-            maxTextLen,
-            avgLen,
-            // Weight for proportional column width
-            weight: isIndex ? 1 : (isNumeric ? Math.max(avgLen * 0.8, 3) : Math.max(avgLen, 4))
-          });
-        }
-
-        // Also factor in header text lengths for column widths
-        const headersToCheck = multiRowHeader.length > 0 ? multiRowHeader : (headerRow ? [headerRow] : []);
-        for (const hRow of headersToCheck) {
-          for (let c = 0; c < Math.min(hRow.length, maxCols); c++) {
-            const hLen = String(hRow[c] || '').length;
-            if (hLen > colMeta[c].weight) {
-              colMeta[c].weight = Math.max(colMeta[c].weight, hLen * 0.7);
-            }
-          }
-        }
-
-        // ======= COMPUTE COLUMN STYLES (Intelligent sizing & Wide Table Protection) =======
-        const isWideTable = maxCols > 12;
-        const columnStyles = {};
-
-        if (isWideTable) {
-          // For wide tables (e.g. RAB with 15-30 columns):
-          // Give every column its comfortable natural width so numbers and words never wrap awkwardly.
-          // jsPDF AutoTable will cleanly split excess columns across pages using horizontalPageBreak.
-          for (let c = 0; c < maxCols; c++) {
-            const m = colMeta[c];
-            let widthMm = 16; // default comfortable width
-            if (m.isIndex) {
-              widthMm = 10;
-            } else if (m.isCurrency) {
-              widthMm = 28; // Fits 'Rp 115.000,00' on a single clean line
-            } else if (m.isNumeric) {
-              widthMm = 16;
-            } else if (c === 1 || m.maxTextLen > 25) {
-              widthMm = 40; // Wide room for 'Uraian Pekerjaan' / long names
-            } else {
-              widthMm = Math.max(m.avgLen * 1.8, 18);
+        // 4. Construct table rows with colSpan and rowSpan
+        const allTableRows = [];
+        for (let r = tableStartR; r <= range.e.r; r++) {
+          const cells = [];
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const m = (mergeMap[r] && mergeMap[r][c]) || null;
+            if (m && m.skip) {
+              continue; // Skip cell covered by a colSpan or rowSpan
             }
 
-            columnStyles[c] = {
-              cellWidth: widthMm,
-              halign: m.isNumeric ? 'right' : (m.isIndex ? 'center' : 'left')
+            const addr = window.XLSX.utils.encode_cell({ r, c });
+            const cell = ws[addr];
+            let val = '';
+            if (cell) {
+              val = cell.w !== undefined ? String(cell.w).trim() : (cell.v !== undefined ? String(cell.v).trim() : '');
+            }
+
+            // Detect cell text alignment
+            let halign = 'left';
+            if (cell && cell.t === 'n') {
+              halign = 'right';
+            } else if (/^[\d.,Rp\s\-]+$/.test(val) && /\d/.test(val) && !/[a-zA-Z]/.test(val.replace(/Rp/gi, ''))) {
+              halign = 'right';
+            } else if (val.length <= 4 && /^\d+$/.test(val)) {
+              halign = 'center';
+            } else if (val.length <= 5 && /^(M3|Sak|Kg|Buah|Batang|Keping|Lembar|Unit|m'|m2|m3)$/i.test(val)) {
+              halign = 'center';
+            }
+
+            const cellObj = {
+              content: val,
+              styles: { halign: halign }
             };
+
+            if (m && m.origin) {
+              if (m.rs > 1) cellObj.rowSpan = m.rs;
+              if (m.cs > 1) cellObj.colSpan = m.cs;
+            }
+            cells.push(cellObj);
           }
-        } else {
-          // For standard tables (<= 12 columns):
-          // Scale proportionally to fill printable page width perfectly
-          const totalWeight = colMeta.reduce((s, m) => s + m.weight, 0);
-          for (let c = 0; c < maxCols; c++) {
-            const proportion = colMeta[c].weight / totalWeight;
-            const colWidthMm = Math.max(proportion * printableWidth, 10);
-            
-            columnStyles[c] = {
-              cellWidth: colWidthMm,
-              halign: colMeta[c].isNumeric ? 'right' : (colMeta[c].isIndex ? 'center' : 'left')
-            };
+
+          if (cells.some(c => c.content !== '')) {
+            allTableRows.push(cells);
           }
         }
 
-        // Add page if not the first table
+        if (allTableRows.length === 0) continue;
+
+        // Add page for subsequent sheets
         if (!isFirstTable) {
           doc.addPage([pageWidth, pageHeight], orientation);
         }
         isFirstTable = false;
 
-        // ======= RENDER TITLE LINES ABOVE TABLE =======
-        let currentY = topMm;
+        // 5. Render titles above table
+        let curY = Math.max(topMm, 8);
         if (titleLines.length > 0) {
           for (let ti = 0; ti < titleLines.length; ti++) {
-            const titleText = titleLines[ti];
-            const titleFontSize = ti === 0 ? 11 : 9;
+            const titleFontSize = ti === 0 ? 10 : 8.5;
             doc.setFontSize(titleFontSize);
             doc.setTextColor(15, 23, 42);
             doc.setFont('helvetica', ti === 0 ? 'bold' : 'normal');
 
-            // Center the title text in the printable area
             const centerX = leftMm + printableWidth / 2;
-            doc.text(titleText, centerX, currentY + 4, { align: 'center', maxWidth: printableWidth - 4 });
-            currentY += titleFontSize * 0.5 + 3;
+            doc.text(titleLines[ti], centerX, curY, {
+              align: 'center',
+              maxWidth: printableWidth - 4
+            });
+            curY += titleFontSize * 0.45 + 2.5;
           }
-          currentY += 2; // Small gap before table
-        }
-
-        // Sheet name label for multi-sheet documents
-        if (sheetsToRender.length > 1 && titleLines.length === 0) {
+          curY += 1.5;
+        } else if (sheetsToRender.length > 1) {
           doc.setFontSize(9);
-          doc.setTextColor(100, 116, 139);
-          doc.setFont('helvetica', 'italic');
-          doc.text(`Sheet: ${sName}`, leftMm, currentY + 3);
-          currentY += 6;
+          doc.setTextColor(51, 65, 85);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`Sheet: ${sName}`, leftMm, curY);
+          curY += 5;
         }
 
-        // ======= DYNAMIC FONT SIZE =======
-        let fontSize = 8;
-        let cellPadding = 1.4;
+        // 6. Split header vs body rows
+        const headPart = allTableRows.slice(0, headerRowsCount);
+        const bodyPart = allTableRows.slice(headerRowsCount);
 
-        if (!isWideTable) {
-          if (maxCols > 9) {
-            fontSize = 7.5;
-            cellPadding = 1.2;
-          } else if (maxCols <= 6) {
-            fontSize = 9;
-            cellPadding = 1.8;
-          }
-        } else {
-          // In wide tables with horizontalPageBreak, columns have ample room
-          fontSize = 7;
-          cellPadding = 1.0;
+        // 7. Dynamic font size & cell padding based on column count
+        let fontSize = 7;
+        let cellPadding = 1.0;
+        if (totalCols > 25) {
+          fontSize = 4.5;
+          cellPadding = 0.55;
+        } else if (totalCols > 16) {
+          fontSize = 5.5;
+          cellPadding = 0.75;
+        } else if (totalCols > 10) {
+          fontSize = 6.5;
+          cellPadding = 0.9;
+        } else if (totalCols <= 6) {
+          fontSize = 8.5;
+          cellPadding = 1.4;
         }
 
-        // ======= BUILD AUTOTABLE CONFIG =======
-        const headConfig = multiRowHeader.length > 0 
-          ? multiRowHeader 
-          : (headerRow ? [headerRow] : []);
-
-        const autoTableConfig = {
-          head: headConfig,
-          body: bodyRows,
-          startY: currentY,
+        // 8. AutoTable invocation
+        doc.autoTable({
+          startY: curY,
+          head: headPart,
+          body: bodyPart,
           margin: {
-            top: topMm,
-            bottom: bottomMm,
             left: leftMm,
-            right: rightMm
+            right: rightMm,
+            top: curY,
+            bottom: bottomMm
           },
-          tableWidth: isWideTable ? 'wrap' : printableWidth,
-          horizontalPageBreak: isWideTable,
-          horizontalPageBreakRepeat: isWideTable ? [0, 1] : null,
           theme: 'grid',
-          columnStyles: columnStyles,
+          showHead: 'everyPage',
+          tableWidth: printableWidth,
           styles: {
             fontSize: fontSize,
             cellPadding: cellPadding,
-            overflow: 'linebreak',
-            font: 'helvetica',
-            lineWidth: 0.15,
+            lineWidth: showGridlines ? 0.1 : 0.05,
             lineColor: [203, 213, 225],
             textColor: [30, 41, 59],
-            valign: 'middle'
+            overflow: 'linebreak',
+            valign: 'middle',
+            font: 'helvetica'
           },
           headStyles: {
             fillColor: [241, 245, 249],
             textColor: [15, 23, 42],
             fontStyle: 'bold',
             halign: 'center',
-            lineWidth: 0.2,
+            lineWidth: 0.15,
             lineColor: [148, 163, 184],
-            valign: 'middle',
-            cellPadding: Math.max(cellPadding, 1.0)
+            valign: 'middle'
           },
           alternateRowStyles: {
             fillColor: [248, 250, 252]
-          },
-          didDrawPage: function (data) {
-            // Page number in footer margin
-            const pageNum = doc.internal.getNumberOfPages();
-            doc.setFontSize(7);
-            doc.setTextColor(140, 150, 160);
-            doc.setFont('helvetica', 'normal');
-            const footerText = `Hal ${pageNum}`;
-            const textWidth = doc.getTextWidth(footerText);
-            doc.text(footerText, pageWidth - rightMm - textWidth, pageHeight - Math.max(bottomMm / 2, 4));
-
-            // Re-draw sheet name on continuation pages for multi-sheet docs
-            if (sheetsToRender.length > 1) {
-              doc.text(`Sheet: ${sName}`, leftMm, Math.max(topMm - 2, 4));
-            }
           }
-        };
+        });
+      }
 
-        // Render table
-        if (doc.autoTable) {
-          doc.autoTable(autoTableConfig);
-        } else {
-          throw new Error("Plugin jsPDF-AutoTable belum tersedia.");
-        }
+      // 9. Add professional page numbers in the footer of every page
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let p = 1; p <= totalPages; p++) {
+        doc.setPage(p);
+        doc.setFontSize(7);
+        doc.setTextColor(140, 150, 160);
+        doc.setFont('helvetica', 'normal');
+        const footerText = `Hal ${p} / ${totalPages}`;
+        const textWidth = doc.getTextWidth(footerText);
+        doc.text(footerText, pageWidth - rightMm - textWidth, pageHeight - Math.max(bottomMm / 2, 4));
       }
 
       // Finalize PDF
       const pdfBlob = doc.output('blob');
       const pdfArrayBuffer = doc.output('arraybuffer');
-      const totalPages = doc.internal.getNumberOfPages();
       const pdfSize = pdfBlob.size;
       const durationSeconds = ((performance.now() - startTime) / 1000).toFixed(2);
       const downloadName = filename.replace(/\.[^/.]+$/, "") + ".pdf";
@@ -514,14 +416,13 @@
         pdf_size_formatted: formatBytes(pdfSize),
         total_pages: totalPages,
         duration_seconds: durationSeconds,
-        engine: "Offline Client-Side Engine (SheetJS + jsPDF)",
-        auto_landscape: orientation === 'landscape' && (options.orientation || 'portrait').toLowerCase() === 'portrait'
+        engine: "Client-Side Engine v3.5 (Precision AutoTable)",
+        auto_landscape: autoLandscapeTriggered
       };
     },
 
     /**
      * Generates visual page preview thumbnails from PDF buffer using PDF.js.
-     * Uses optimized JPEG rendering for blazingly fast preview generation.
      */
     generatePreviews: async function (pdfArrayBuffer, maxPages = 1) {
       if (!window.pdfjsLib) {
@@ -544,24 +445,13 @@
           canvas.height = viewport.height;
           canvas.width = viewport.width;
 
-          const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-          };
-
-          await page.render(renderContext).promise;
+          await page.render({ canvasContext: context, viewport: viewport }).promise;
           const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
-          previews.push({
-            page: i,
-            url: dataUrl
-          });
+          previews.push({ page: i, url: dataUrl });
         }
 
-        return {
-          total_pages: totalPages,
-          previews: previews
-        };
+        return { total_pages: totalPages, previews: previews };
       } catch (err) {
         console.warn("Pratinjau cepat PDF.js:", err);
         return { total_pages: 1, previews: [] };
@@ -569,7 +459,7 @@
     },
 
     /**
-     * Renders a single specific page on demand in ~50ms.
+     * Renders a single specific page on demand.
      */
     renderSinglePage: async function (pdfArrayBuffer, pageNumber) {
       if (!window.pdfjsLib) return null;
@@ -587,10 +477,9 @@
         canvas.width = viewport.width;
 
         await page.render({ canvasContext: context, viewport: viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         return {
           page: pageNumber,
-          url: dataUrl
+          url: canvas.toDataURL('image/jpeg', 0.85)
         };
       } catch (e) {
         console.warn("Gagal render halaman tunggal:", e);
@@ -602,7 +491,6 @@
      * Saves or shares the PDF based on platform (Native Android APK vs Browser)
      */
     deliverPdf: function (pdfBlob, filename) {
-      // 1. If running inside Android APK with JavascriptInterface
       if (window.AndroidBridge) {
         const reader = new FileReader();
         reader.onloadend = function () {
@@ -617,7 +505,6 @@
         return;
       }
 
-      // 2. Standard Browser Blob Download
       const url = URL.createObjectURL(pdfBlob);
       const a = document.createElement('a');
       a.href = url;
