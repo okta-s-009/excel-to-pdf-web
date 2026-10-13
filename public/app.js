@@ -483,6 +483,16 @@ document.addEventListener('DOMContentLoaded', () => {
         sheetSelectGroup.classList.remove('hidden');
         convertBtn.disabled = false;
         convertHintText.textContent = 'Siap dikonversi dengan pengaturan margin Anda';
+
+        // AUTO-LANDSCAPE: detect wide tables and auto-switch orientation
+        if (data.details && data.details.length > 0) {
+          const maxCol = Math.max(...data.details.map(d => d.max_column || 0));
+          if (maxCol > 7 && state.orientation !== 'landscape') {
+            setOrientation('landscape');
+            showToast(`Tabel memiliki ${maxCol} kolom. Orientasi otomatis diatur ke Landscape untuk hasil cetak optimal.`, 'info');
+          }
+        }
+
         showToast(`File "${file.name}" berhasil dimuat!`, 'success');
       } else {
         inspectFileLocally(file);
@@ -514,6 +524,16 @@ document.addEventListener('DOMContentLoaded', () => {
         sheetSelectGroup.classList.remove('hidden');
         convertBtn.disabled = false;
         convertHintText.textContent = 'Siap dikonversi secara instan!';
+
+        // AUTO-LANDSCAPE: detect wide tables and auto-switch orientation
+        if (data.details && data.details.length > 0) {
+          const maxCol = Math.max(...data.details.map(d => d.max_column || 0));
+          if (maxCol > 7 && state.orientation !== 'landscape') {
+            setOrientation('landscape');
+            showToast(`Tabel memiliki ${maxCol} kolom. Orientasi otomatis diatur ke Landscape untuk hasil cetak optimal.`, 'info');
+          }
+        }
+
         showToast(`File "${file.name}" siap dikonversi!`, 'success');
         return;
       } catch (err) {
@@ -868,7 +888,11 @@ document.addEventListener('DOMContentLoaded', () => {
     state.zoomLevel = 100;
 
     displayConversionResult(taskResult);
-    showToast('Konversi selesai dalam ' + result.duration_seconds + ' detik!', 'success');
+    if (result.auto_landscape) {
+      showToast(`Konversi selesai (${result.duration_seconds}s)! Orientasi otomatis disesuaikan ke Landscape agar tabel rapi.`, 'success');
+    } else {
+      showToast('Konversi selesai dalam ' + result.duration_seconds + ' detik!', 'success');
+    }
 
     resultBadgeCounter.classList.remove('hidden');
     switchTab('pdfResult');

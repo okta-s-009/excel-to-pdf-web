@@ -372,9 +372,11 @@ def _convert_via_reportlab_fallback(
     paper_size: str,
     sheet_name: str
 ):
+    import re
     from reportlab.lib.pagesizes import A4, LETTER, LEGAL, A3, landscape, portrait
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib import colors
 
     size_map = {
@@ -384,13 +386,27 @@ def _convert_via_reportlab_fallback(
         "A3": A3
     }
     base_size = size_map.get(paper_size, A4)
-    pagesize = landscape(base_size) if orientation.lower() == "landscape" else portrait(base_size)
 
     wb = openpyxl.load_workbook(excel_path, data_only=True)
     if sheet_name and sheet_name.lower() != "all" and sheet_name in wb.sheetnames:
         sheets = [wb[sheet_name]]
     else:
         sheets = [wb[s] for s in wb.sheetnames]
+
+    # Pre-scan sheets to find global max columns for auto-landscape
+    global_max_cols = 0
+    for ws in sheets:
+        for row in ws.iter_rows(values_only=True):
+            non_empty = [c for c in row if c is not None and str(c).strip() != ""]
+            if len(non_empty) > global_max_cols:
+                global_max_cols = len(non_empty)
+
+    final_orientation = orientation.lower()
+    if final_orientation == "portrait" and global_max_cols > 7:
+        final_orientation = "landscape"
+
+    pagesize = landscape(base_size) if final_orientation == "landscape" else portrait(base_size)
+    available_width = max(pagesize[0] - left_margin_pt - right_margin_pt, 200)
 
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -403,43 +419,190 @@ def _convert_via_reportlab_fallback(
 
     story = []
     styles = getSampleStyleSheet()
+
     title_style = ParagraphStyle(
-        'SheetTitle',
-        parent=styles['Heading2'],
-        textColor=colors.HexColor('#1E293B'),
-        spaceAfter=10
+        'DocTitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor('#0F172A'),
+        alignment=TA_CENTER,
+        spaceAfter=3
     )
 
-    for ws in sheets:
-        if len(sheets) > 1:
-            story.append(Paragraph(f"<b>Sheet: {ws.title}</b>", title_style))
-            story.append(Spacer(1, 8))
+    subtitle_style = ParagraphStyle(
+        'DocSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor('#475569'),
+        alignment=TA_CENTER,
+        spaceAfter=6
+    )
 
-        data = []
+    sheet_heading_style = ParagraphStyle(
+        'SheetHeading',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=10,
+        leading=13,
+        textColor=colors.HexColor('#334155'),
+        alignment=TA_LEFT,
+        spaceAfter=6
+    )
+
+    for sheet_idx, ws in enumerate(sheets):
+        if sheet_idx > 0:
+            story.append(PageBreak())
+
+        raw_rows = []
         for row in ws.iter_rows(values_only=True):
-            cleaned_row = [str(cell) if cell is not None else "" for cell in row]
-            if any(cleaned_row):
-                data.append(cleaned_row)
+            cleaned = [str(c).strip() if c is not None else "" for c in row]
+            if any(cleaned):
+                raw_rows.append(cleaned)
 
-        if not data:
-            data = [["(Lembar kerja kosong)"]]
+        if not raw_rows:
+            story.append(Paragraph(f"<b>Sheet: {ws.title}</b> (Lembar kerja kosong)", sheet_heading_style))
+            continue
 
-        # Calculate max columns
-        max_cols = max(len(r) for r in data)
-        padded_data = [r + [""] * (max_cols - len(r)) for r in data]
+        max_cols = max(len(r) for r in raw_rows)
+        padded_rows = [r + [""] * (max_cols - len(r)) for r in raw_rows]
 
-        t = Table(padded_data)
-        t.setStyle(TableStyle([
+        # Smart title detection
+        title_lines = []
+        data_start_idx = 0
+        for ri in range(min(len(padded_rows), 5)):
+            r = padded_rows[ri]
+            filled = [c for c in r if c != ""]
+            if len(filled) == 0:
+                data_start_idx = ri + 1
+                continue
+            longest = max((len(c) for c in filled), default=0)
+            if len(filled) <= 2 and longest > 15 and max_cols > 3:
+                title_lines.append(" ".join(filled))
+                data_start_idx = ri + 1
+            else:
+                break
+
+        # Render titles above table
+        if title_lines:
+            for ti, t_text in enumerate(title_lines):
+                st = title_style if ti == 0 else subtitle_style
+                story.append(Paragraph(t_text, st))
+            story.append(Spacer(1, 4))
+        elif len(sheets) > 1:
+            story.append(Paragraph(f"<b>Sheet: {ws.title}</b>", sheet_heading_style))
+
+        data_rows = padded_rows[data_start_idx:]
+        if not data_rows:
+            continue
+
+        header_row = data_rows[0]
+        body_rows = data_rows[1:]
+
+        # Column weights & alignments
+        col_weights = []
+        col_aligns = []
+        for c in range(max_cols):
+            h_val = header_row[c] if c < len(header_row) else ""
+            h_len = len(h_val)
+
+            num_count = 0
+            sample_count = 0
+            max_len = h_len
+            for r in body_rows[:30]:
+                val = r[c] if c < len(r) else ""
+                if not val:
+                    continue
+                sample_count += 1
+                if len(val) > max_len:
+                    max_len = len(val)
+                clean_num = re.sub(r'[Rp.,\s]', '', val)
+                if clean_num.isdigit() or (clean_num.startswith('-') and clean_num[1:].isdigit()):
+                    num_count += 1
+
+            is_numeric = sample_count > 0 and (num_count / sample_count) > 0.6
+            is_index = is_numeric and max_len <= 4
+
+            # Ensure header has enough width so single words like 'Qty' or 'No' never wrap vertically
+            min_header_w = max(h_len * 1.1, 4.0)
+
+            if is_index:
+                col_aligns.append(TA_CENTER)
+                col_weights.append(max(min_header_w, 3.5))
+            elif is_numeric:
+                col_aligns.append(TA_RIGHT)
+                col_weights.append(max(max_len * 0.85, min_header_w, 5.0))
+            else:
+                col_aligns.append(TA_LEFT)
+                col_weights.append(max(max_len * 0.9, min_header_w, 6.0))
+
+        total_weight = sum(col_weights) or 1
+        col_widths = [(w / total_weight) * available_width for w in col_weights]
+
+        # Dynamic font size
+        font_size = 7.5
+        leading = 9.5
+        if max_cols > 15:
+            font_size = 5.5
+            leading = 7.0
+        elif max_cols > 10:
+            font_size = 6.5
+            leading = 8.5
+
+        th_style = ParagraphStyle(
+            'TH',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=font_size,
+            leading=leading,
+            textColor=colors.HexColor('#0F172A'),
+            alignment=TA_CENTER
+        )
+
+        td_styles = [
+            ParagraphStyle(
+                f'TD_{sheet_idx}_{c}',
+                parent=styles['Normal'],
+                fontName='Helvetica',
+                fontSize=font_size,
+                leading=leading,
+                textColor=colors.HexColor('#1E293B'),
+                alignment=col_aligns[c]
+            ) for c in range(max_cols)
+        ]
+
+        table_matrix = []
+        th_cells = [Paragraph(f"<b>{header_row[c]}</b>", th_style) for c in range(max_cols)]
+        table_matrix.append(th_cells)
+
+        for r in body_rows:
+            row_cells = []
+            for c in range(max_cols):
+                val = r[c] if c < len(r) else ""
+                cell_p = Paragraph(val or "", td_styles[c])
+                row_cells.append(cell_p)
+            table_matrix.append(row_cells)
+
+        table = Table(table_matrix, colWidths=col_widths, repeatRows=1)
+        table_style_commands = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F1F5F9')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#0F172A')),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
-        ]))
-        story.append(t)
+            ('LINEBELOW', (0, 0), (-1, 0), 1.0, colors.HexColor('#94A3B8')),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ]
+        for ri in range(1, len(table_matrix)):
+            bg = colors.HexColor('#F8FAFC') if ri % 2 == 1 else colors.white
+            table_style_commands.append(('BACKGROUND', (0, ri), (-1, ri), bg))
+
+        table.setStyle(TableStyle(table_style_commands))
+        story.append(table)
         story.append(Spacer(1, 15))
 
     doc.build(story)
