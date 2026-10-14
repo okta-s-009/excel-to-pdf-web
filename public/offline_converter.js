@@ -669,8 +669,8 @@
             const pal = PALETTE[cType] || PALETTE.default;
 
             let halign = pal.halign;
-            // Heuristic override for alignment if cell has specific format
-            if (!isHeaderRow && halign === 'left') {
+            // Heuristic override for alignment if cell has specific format (number or currency)
+            if (!isHeaderRow) {
               if (cell && cell.t === 'n') halign = 'right';
               else if (/^[\(]?[\-]?\s*(Rp|IDR|\$|€|£)?\s*[\d.,]+\s*[\)]?$/.test(val) && /\d/.test(val)) halign = 'right';
               else if (val.length <= 5 && /^\d+$/.test(val)) halign = 'center';
@@ -711,11 +711,12 @@
             rowCells.push(cellObj);
           }
 
-          // Check if summary / total row
-          const isTotalRow = !isHeaderRow && rowHasContent && rowCells.some(c => {
-            const txt = (c.content || '').toUpperCase();
+          // Check if summary / total row (only if first cell with text matches total keywords)
+          const firstCellWithText = rowCells.find(c => (c.content || '').trim() !== '');
+          const isTotalRow = !isHeaderRow && firstCellWithText && (() => {
+            const txt = (firstCellWithText.content || '').toUpperCase();
             return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|SISA SALDO|SALDO AKHIR)\b/.test(txt);
-          });
+          })();
           if (isTotalRow) {
             rowCells.forEach(c => { c._isTotal = true; });
           }
@@ -802,6 +803,94 @@
             }
           }
 
+          // SMART SUMMARY & TRAILING ROW FORMATTING
+          // 1. Harmonize consecutive summary rows that only occupy leading columns
+          const summaryGroups = [];
+          let currentGroup = [];
+
+          for (let ri = 0; ri < bodyRows.length; ri++) {
+            const row = bodyRows[ri];
+            let lastContentIdx = -1;
+            for (let ci = 0; ci < row.length; ci++) {
+              if ((row[ci].content || '').trim() !== '') {
+                lastContentIdx = ci;
+              }
+            }
+
+            const nonEmptyCells = row.filter(c => (c.content || '').trim() !== '');
+            // A summary row has data in at most 2 cells (e.g. label and value),
+            // with content ending in the first few columns while the table has more columns.
+            const isSummaryRow = (nonEmptyCells.length >= 1 && nonEmptyCells.length <= 2 && lastContentIdx <= 2 && lastContentIdx < row.length - 1);
+
+            if (isSummaryRow) {
+              currentGroup.push({ ri, row, nonEmptyCells, lastContentIdx });
+            } else {
+              if (currentGroup.length > 0) summaryGroups.push(currentGroup);
+              currentGroup = [];
+            }
+          }
+          if (currentGroup.length > 0) summaryGroups.push(currentGroup);
+
+          summaryGroups.forEach(group => {
+            // Find common colSpan for value cells across the group
+            let targetValColSpan = 2; // Default to 2 columns (e.g. volume + satuan)
+            const hasSpan2 = group.some(item => item.nonEmptyCells.length >= 2 && (item.nonEmptyCells[1].colSpan || 1) === 2);
+            if (!hasSpan2) {
+              let maxSpan = 1;
+              group.forEach(item => {
+                if (item.nonEmptyCells.length >= 2) {
+                  maxSpan = Math.max(maxSpan, item.nonEmptyCells[1].colSpan || 1);
+                }
+              });
+              targetValColSpan = Math.max(maxSpan, 2);
+            }
+
+            group.forEach(item => {
+              const row = item.row;
+              if (item.nonEmptyCells.length >= 2) {
+                const valCell = item.nonEmptyCells[1];
+                const valIdx = row.indexOf(valCell);
+                const oldSpan = valCell.colSpan || 1;
+                const newSpan = targetValColSpan;
+                valCell.colSpan = newSpan;
+                valCell.styles = valCell.styles || {};
+                valCell.styles.halign = 'right';
+
+                if (newSpan > oldSpan) {
+                  row.splice(valIdx + 1, newSpan - oldSpan);
+                } else if (newSpan < oldSpan) {
+                  for (let k = 0; k < oldSpan - newSpan; k++) {
+                    row.splice(valIdx + 1, 0, { content: '', _isTrailingEmpty: true });
+                  }
+                }
+              }
+
+              // Mark all trailing cells after the value cell as trailing empty (no borders, no bg)
+              const valCell = item.nonEmptyCells.length >= 2 ? item.nonEmptyCells[1] : item.nonEmptyCells[0];
+              const valIdx = row.indexOf(valCell);
+              for (let ci = valIdx + 1; ci < row.length; ci++) {
+                row[ci]._isTrailingEmpty = true;
+              }
+            });
+          });
+
+          // Also mark any row where only 1-3 cells have content and the rest are trailing empty
+          for (let ri = 0; ri < bodyRows.length; ri++) {
+            const row = bodyRows[ri];
+            let lastContentIdx = -1;
+            for (let ci = 0; ci < row.length; ci++) {
+              if ((row[ci].content || '').trim() !== '') {
+                lastContentIdx = ci;
+              }
+            }
+            const nonEmptyCount = row.filter(c => (c.content || '').trim() !== '').length;
+            if (nonEmptyCount >= 1 && nonEmptyCount <= 3 && lastContentIdx < row.length - 1) {
+              for (let ci = lastContentIdx + 1; ci < row.length; ci++) {
+                row[ci]._isTrailingEmpty = true;
+              }
+            }
+          }
+
           // AutoTable invocation
           doc.autoTable({
             startY: curY,
@@ -836,11 +925,18 @@
               minCellHeight: fontSize * 0.35 + cellPadding * 2 + 1.5
             },
             didParseCell: function (data) {
+              const raw = data.cell.raw;
+
+              // Trailing empty cells in summary / short rows: completely invisible (no border, clean page)
+              if (raw && raw._isTrailingEmpty) {
+                data.cell.styles.lineWidth = 0;
+                data.cell.styles.fillColor = [255, 255, 255];
+                return;
+              }
+
               // Guarantee visible, crisp, unbroken borders on all cells
               data.cell.styles.lineWidth = 0.18;
               data.cell.styles.lineColor = [148, 163, 184];
-
-              const raw = data.cell.raw;
 
               // PRIORITY 1: Explicit custom fill color from Excel (e.g. bright yellow)
               if (raw && raw._excelColor) {
