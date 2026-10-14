@@ -349,9 +349,16 @@
         const bodyPart = allTableRows.slice(headerRowsCount);
 
         // 7. Dynamic font size & cell padding based on column count
+        const fitMode = options.fit_mode || 'auto';
+        const isAutoFit = fitMode === 'auto';
+        const useHorizontalBreak = isAutoFit && totalCols > 10;
+
         let fontSize = 7;
         let cellPadding = 1.0;
-        if (totalCols > 25) {
+        if (useHorizontalBreak) {
+          fontSize = 7.5;
+          cellPadding = 1.0;
+        } else if (totalCols > 25) {
           fontSize = 4.5;
           cellPadding = 0.55;
         } else if (totalCols > 16) {
@@ -366,7 +373,7 @@
         }
 
         // 8. AutoTable invocation
-        doc.autoTable({
+        const autoTableConfig = {
           startY: curY,
           head: headPart,
           body: bodyPart,
@@ -378,7 +385,7 @@
           },
           theme: 'grid',
           showHead: 'everyPage',
-          tableWidth: printableWidth,
+          tableWidth: useHorizontalBreak ? 'wrap' : printableWidth,
           styles: {
             fontSize: fontSize,
             cellPadding: cellPadding,
@@ -401,7 +408,15 @@
           alternateRowStyles: {
             fillColor: [248, 250, 252]
           }
-        });
+        };
+
+        if (useHorizontalBreak) {
+          autoTableConfig.horizontalPageBreak = true;
+          autoTableConfig.horizontalPageBreakRepeat = [0, 1];
+          autoTableConfig.horizontalPageBreakBehaviour = 'afterAllRows';
+        }
+
+        doc.autoTable(autoTableConfig);
       }
 
       // 9. Add professional page numbers in the footer of every page

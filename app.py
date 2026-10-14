@@ -95,7 +95,7 @@ async def convert_file(
     footer_margin: Optional[float] = Form(None),
     orientation: str = Form("portrait"),
     paper_size: str = Form("A4"),
-    fit_mode: str = Form("fit_width"),
+    fit_mode: str = Form("auto"),
     center_horizontally: bool = Form(True),
     center_vertically: bool = Form(False),
     sheet_name: str = Form("all"),
