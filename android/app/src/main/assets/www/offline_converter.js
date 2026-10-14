@@ -623,29 +623,17 @@
           return false;
         };
         const rowBlock = {};
-        const bodyBlockIds = [];
-        let secCounter = 0;
-        let blankRun = 0;
-        let secRowCount = headerRowsCount;
         for (let r = tableStartR; r <= range.e.r; r++) {
-          if (r < tableStartR + headerRowsCount) { rowBlock[r] = 'H'; continue; }
-          if (rowHasData(r)) {
-            if (blankRun >= 2 && secRowCount >= 2) { secCounter++; secRowCount = 0; }
-            blankRun = 0;
-            const blk = 'B' + secCounter;
-            if (!bodyBlockIds.includes(blk)) bodyBlockIds.push(blk);
-            rowBlock[r] = blk;
-            secRowCount++;
-          } else {
-            blankRun++;
+          if (r < tableStartR + headerRowsCount) {
+            rowBlock[r] = 'H';
+          } else if (rowHasData(r)) {
+            rowBlock[r] = 'B';
           }
         }
 
-        // ---- PASS 2: build cells. RowSpans are clipped to rendered rows of the same block, and
-        // cells whose merge origin lives in another block are materialized, so every row keeps
-        // exactly the right number of columns (no shifted / lost columns). ----
+        // ---- PASS 2: build cells. All body rows belong to the same unified table ----
         const headRows = [];
-        const bodyBlocks = {};
+        const bodyRows = [];
         const keptRows = Object.keys(rowBlock).map(Number).sort((a, b) => a - b);
 
         for (const r of keptRows) {
@@ -709,7 +697,7 @@
             if (materialColSpan > 1) cellObj.colSpan = materialColSpan;
 
             if (m && m.origin) {
-              // Effective rowSpan = rendered rows of the SAME block inside the merge range
+              // Effective rowSpan = rendered rows inside the merge range
               let rs = 0;
               for (let r2 = r; r2 <= r + m.rs - 1; r2++) {
                 if (rowBlock[r2] === blk) rs++;
@@ -735,109 +723,45 @@
           if (isHeaderRow) {
             headRows.push(rowCells);
           } else {
-            if (!bodyBlocks[blk]) bodyBlocks[blk] = [];
-            bodyBlocks[blk].push(rowCells);
+            bodyRows.push(rowCells);
           }
         }
 
-        // Assemble sections: [{ head, body }]
-        const cloneRows = (rows) => rows.map(row => row.map(cl => ({ ...cl, styles: { ...cl.styles } })));
-        const tableSections = [];
-        if (bodyBlockIds.length === 0) {
-          if (headRows.length > 0) tableSections.push({ head: headRows, body: [] });
-        } else {
-          bodyBlockIds.forEach((blk, idx) => {
-            const body = bodyBlocks[blk] || [];
-            if (body.length === 0) return;
-            if (idx === 0) {
-              tableSections.push({ head: headRows, body });
-              return;
-            }
-            // Follow-on block: repeat the main header only if it spans most of the table width
-            // (e.g. totals under the same columns); small side tables get no foreign header.
-            let minC = Infinity, maxC = -Infinity;
-            body.forEach(row => row.forEach(cl => {
-              if (cl.content) {
-                minC = Math.min(minC, cl._c);
-                maxC = Math.max(maxC, cl._c + (cl.colSpan || 1) - 1);
-              }
-            }));
-            const spanCols = maxC >= minC ? (maxC - minC + 1) : 0;
-            const head = (headRows.length > 0 && spanCols >= totalCols * 0.5) ? cloneRows(headRows) : [];
-            tableSections.push({ head, body });
-          });
+        if (headRows.length === 0 && bodyRows.length === 0) continue;
+
+        if (!isFirstTable) {
+          doc.addPage([pageWidth, pageHeight], orientation);
+        }
+        isFirstTable = false;
+
+        // Render Document Title above Table
+        let curY = Math.max(topMm, 8);
+        if (titleLines.length > 0) {
+          for (let ti = 0; ti < titleLines.length; ti++) {
+            const titleFontSize = ti === 0 ? 11 : 9;
+            doc.setFontSize(titleFontSize);
+            doc.setTextColor(15, 23, 42);
+            doc.setFont('helvetica', 'bold');
+            const centerX = leftMm + printableWidth / 2;
+            doc.text(titleLines[ti], centerX, curY, {
+              align: 'center',
+              maxWidth: printableWidth - 4
+            });
+            curY += titleFontSize * 0.45 + 3.0;
+          }
+          curY += 2.0;
+        } else if (sheetsToRender.length > 1) {
+          doc.setFontSize(10);
+          doc.setTextColor(30, 41, 59);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`Sheet: ${sName}`, leftMm, curY);
+          curY += 6.0;
         }
 
-        if (tableSections.length === 0) continue;
-
-        // Render each table section
-        // Count total rows across sections in this sheet for smart 1-page fitting
-        let totalSheetRows = 0;
-        tableSections.forEach(sec => {
-          totalSheetRows += (sec.head.length + sec.body.length);
-        });
-
-        // Determine if sheet should fit on 1 page:
-        // 1) Explicit 'fit_page' setting, OR
-        // 2) Compact sheet (<= 45 rows) in 'auto' mode
+        const totalSheetRows = headRows.length + bodyRows.length;
         const fitMode = (options.fit_mode || 'auto').toLowerCase();
         const shouldFitOnePage = (fitMode === 'fit_page' && totalSheetRows <= 75) ||
                                  (fitMode === 'auto' && totalSheetRows <= 45);
-
-        for (let secIdx = 0; secIdx < tableSections.length; secIdx++) {
-          const headPart = tableSections[secIdx].head;
-          const bodyPart = tableSections[secIdx].body;
-          if (headPart.length === 0 && bodyPart.length === 0) continue;
-
-          let startY = Math.max(topMm, 8);
-
-          if (secIdx === 0) {
-            // New sheet start: only add a page if this is not the very first sheet
-            if (!isFirstTable) {
-              doc.addPage([pageWidth, pageHeight], orientation);
-            }
-            isFirstTable = false;
-
-            // Render Document Title above Table
-            let curY = Math.max(topMm, 8);
-            if (titleLines.length > 0) {
-              for (let ti = 0; ti < titleLines.length; ti++) {
-                const titleFontSize = ti === 0 ? 11 : 9;
-                doc.setFontSize(titleFontSize);
-                doc.setTextColor(15, 23, 42);
-                doc.setFont('helvetica', 'bold');
-                const centerX = leftMm + printableWidth / 2;
-                doc.text(titleLines[ti], centerX, curY, {
-                  align: 'center',
-                  maxWidth: printableWidth - 4
-                });
-                curY += titleFontSize * 0.45 + 3.0;
-              }
-              curY += 2.0;
-            } else if (sheetsToRender.length > 1) {
-              doc.setFontSize(10);
-              doc.setTextColor(30, 41, 59);
-              doc.setFont('helvetica', 'bold');
-              doc.text(`Sheet: ${sName}`, leftMm, curY);
-              curY += 6.0;
-            }
-            startY = curY;
-          } else {
-            // Subsequent section of the SAME sheet: keep on the same page!
-            const prevBottom = doc.lastAutoTable ? doc.lastAutoTable.finalY : startY;
-            const estRowH = 5.5;
-            const estSectionH = (headPart.length + bodyPart.length) * estRowH + 6;
-            const spaceLeft = pageHeight - bottomMm - prevBottom;
-
-            if (spaceLeft >= Math.min(estSectionH, 20)) {
-              // Fits on the current page!
-              startY = prevBottom + 5.0;
-            } else {
-              // Truly overflows current page, start new page
-              doc.addPage([pageWidth, pageHeight], orientation);
-              startY = Math.max(topMm, 8);
-            }
-          }
 
           // Font sizing & padding based on column count and 1-page fit
           let fontSize = 7.5;
@@ -880,9 +804,9 @@
 
           // AutoTable invocation
           doc.autoTable({
-            startY: startY,
-            head: headPart,
-            body: bodyPart,
+            startY: curY,
+            head: headRows,
+            body: bodyRows,
             margin: {
               left: leftMm,
               right: rightMm,
@@ -949,7 +873,6 @@
               }
             }
           });
-        }
       }
 
       // Add clean page numbers in footer
