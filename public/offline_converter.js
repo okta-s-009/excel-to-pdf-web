@@ -355,65 +355,22 @@
           for (let mc = m.s.c; mc <= m.e.c; mc++) mergedCols.add(mc);
         }
 
+
+        // Find real start and real end columns based on actual data and merges (never drop any genuine column)
         let realStartCol = range.s.c;
         for (let c = range.s.c; c <= range.e.c; c++) {
-          if ((colDensity[c] || 0) > 0) {
+          if ((colDensity[c] || 0) > 0 || mergedCols.has(c)) {
             realStartCol = c;
             break;
           }
         }
 
-        const maxColDensity = Math.max(1, ...Object.values(colDensity));
-
-        // Header-like rows near the top (>= 3 text cells). A column carrying a real text
-        // label in one of these rows is a genuine table column even if its data is sparse.
-        const headerLikeRows = [];
-        for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 15); r++) {
-          let textCount = 0;
-          for (let c = range.s.c; c <= range.e.c; c++) {
-            const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
-            if (cell && cell.t === 's' && String(cell.v).trim().length >= 2) textCount++;
-          }
-          if (textCount >= 3) headerLikeRows.push(r);
-        }
-        const hasHeaderLabel = (c) => headerLikeRows.some(r => {
-          const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
-          return Boolean(cell && cell.t === 's' && /[a-zA-Z]{3,}/.test(String(cell.v)));
-        });
-        const isRealColumn = (c) => {
-          const d = colDensity[c] || 0;
-          return d > maxColDensity * 0.15 || mergedCols.has(c) || (d >= 2 && hasHeaderLabel(c));
-        };
-        const isScratchColumn = (c) => {
-          // Only a handful of tiny values (e.g. "1", "T", "an") with no header label
-          if ((colDensity[c] || 0) > 2 || mergedCols.has(c) || hasHeaderLabel(c)) return false;
-          for (let r = range.s.r; r <= range.e.r; r++) {
-            const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
-            if (cell && cell.v !== undefined && String(cell.v).trim().length > 3) return false;
-          }
-          return true;
-        };
-
         let realEndCol = realStartCol;
-        for (let c = realStartCol; c <= range.e.c; c++) {
-          const d = colDensity[c] || 0;
-          if (d === 0 && !mergedCols.has(c)) {
-            // Blank gap: continue only if genuine table columns follow (otherwise stray notes)
-            let nextHasRealTable = false;
-            for (let nc = c + 1; nc <= Math.min(c + 3, range.e.c); nc++) {
-              if (isRealColumn(nc)) { nextHasRealTable = true; break; }
-            }
-            if (!nextHasRealTable) break;
-          } else {
-            // Populated column directly attached to the table: ALWAYS keep it,
-            // even when sparse (e.g. "Adm", "Adm transfer", status columns).
+        for (let c = range.e.c; c >= realStartCol; c--) {
+          if ((colDensity[c] || 0) > 0 || mergedCols.has(c)) {
             realEndCol = c;
+            break;
           }
-        }
-        // Trim only a trailing scratch column glued to the table edge
-        while (realEndCol > realStartCol + 3 && isScratchColumn(realEndCol)) {
-          realEndCol--;
-          while (realEndCol > realStartCol && !(colDensity[realEndCol] || 0) && !mergedCols.has(realEndCol)) realEndCol--;
         }
 
         if (realEndCol < realStartCol) realEndCol = realStartCol;
@@ -767,8 +724,9 @@
           // Font sizing & padding based on column count and 1-page fit
           let fontSize = 7.5;
           let cellPadding = 1.0;
-          if (totalCols > 18) { fontSize = 5.2; cellPadding = 0.5; }
-          else if (totalCols > 14) { fontSize = 6.0; cellPadding = 0.7; }
+          if (totalCols > 30) { fontSize = 4.2; cellPadding = 0.3; }
+          else if (totalCols > 20) { fontSize = 4.8; cellPadding = 0.4; }
+          else if (totalCols > 14) { fontSize = 5.8; cellPadding = 0.6; }
           else if (totalCols > 10) { fontSize = 6.8; cellPadding = 0.8; }
           else if (totalCols > 7) { fontSize = 7.5; cellPadding = 1.0; }
           else if (totalCols <= 6) { fontSize = 8.5; cellPadding = 1.3; }
@@ -777,8 +735,8 @@
             const availHeightMm = pageHeight - topMm - bottomMm - (titleLines.length * 8) - 15;
             const maxRowHeight = availHeightMm / totalSheetRows;
             if (maxRowHeight < 7.0) {
-              fontSize = Math.max(5.2, Math.min(fontSize, maxRowHeight * 1.1));
-              cellPadding = Math.max(0.4, Math.min(cellPadding, (maxRowHeight - fontSize * 0.35) / 2.5));
+              fontSize = Math.max(totalCols > 30 ? 3.8 : 5.0, Math.min(fontSize, maxRowHeight * 1.1));
+              cellPadding = Math.max(0.2, Math.min(cellPadding, (maxRowHeight - fontSize * 0.35) / 2.5));
             }
           }
 
@@ -791,7 +749,7 @@
               const widths = [];
               for (let ci = 0; ci < colWidthChars.length; ci++) {
                 const pct = colWidthChars[ci] / totalCharW;
-                const minColW = totalCols > 12 ? 4.5 : 6.0;
+                const minColW = totalCols > 30 ? 2.5 : (totalCols > 15 ? 4.0 : 6.0);
                 const w = Math.max(pct * printableWidth, minColW);
                 widths.push(w);
                 totalWidthMm += w;
@@ -799,94 +757,6 @@
               const scaleFactor = printableWidth / totalWidthMm;
               for (let ci = 0; ci < widths.length; ci++) {
                 columnStyles[ci] = { cellWidth: widths[ci] * scaleFactor };
-              }
-            }
-          }
-
-          // SMART SUMMARY & TRAILING ROW FORMATTING
-          // 1. Harmonize consecutive summary rows that only occupy leading columns
-          const summaryGroups = [];
-          let currentGroup = [];
-
-          for (let ri = 0; ri < bodyRows.length; ri++) {
-            const row = bodyRows[ri];
-            let lastContentIdx = -1;
-            for (let ci = 0; ci < row.length; ci++) {
-              if ((row[ci].content || '').trim() !== '') {
-                lastContentIdx = ci;
-              }
-            }
-
-            const nonEmptyCells = row.filter(c => (c.content || '').trim() !== '');
-            // A summary row has data in at most 2 cells (e.g. label and value),
-            // with content ending in the first few columns while the table has more columns.
-            const isSummaryRow = (nonEmptyCells.length >= 1 && nonEmptyCells.length <= 2 && lastContentIdx <= 2 && lastContentIdx < row.length - 1);
-
-            if (isSummaryRow) {
-              currentGroup.push({ ri, row, nonEmptyCells, lastContentIdx });
-            } else {
-              if (currentGroup.length > 0) summaryGroups.push(currentGroup);
-              currentGroup = [];
-            }
-          }
-          if (currentGroup.length > 0) summaryGroups.push(currentGroup);
-
-          summaryGroups.forEach(group => {
-            // Find common colSpan for value cells across the group
-            let targetValColSpan = 2; // Default to 2 columns (e.g. volume + satuan)
-            const hasSpan2 = group.some(item => item.nonEmptyCells.length >= 2 && (item.nonEmptyCells[1].colSpan || 1) === 2);
-            if (!hasSpan2) {
-              let maxSpan = 1;
-              group.forEach(item => {
-                if (item.nonEmptyCells.length >= 2) {
-                  maxSpan = Math.max(maxSpan, item.nonEmptyCells[1].colSpan || 1);
-                }
-              });
-              targetValColSpan = Math.max(maxSpan, 2);
-            }
-
-            group.forEach(item => {
-              const row = item.row;
-              if (item.nonEmptyCells.length >= 2) {
-                const valCell = item.nonEmptyCells[1];
-                const valIdx = row.indexOf(valCell);
-                const oldSpan = valCell.colSpan || 1;
-                const newSpan = targetValColSpan;
-                valCell.colSpan = newSpan;
-                valCell.styles = valCell.styles || {};
-                valCell.styles.halign = 'right';
-
-                if (newSpan > oldSpan) {
-                  row.splice(valIdx + 1, newSpan - oldSpan);
-                } else if (newSpan < oldSpan) {
-                  for (let k = 0; k < oldSpan - newSpan; k++) {
-                    row.splice(valIdx + 1, 0, { content: '', _isTrailingEmpty: true });
-                  }
-                }
-              }
-
-              // Mark all trailing cells after the value cell as trailing empty (no borders, no bg)
-              const valCell = item.nonEmptyCells.length >= 2 ? item.nonEmptyCells[1] : item.nonEmptyCells[0];
-              const valIdx = row.indexOf(valCell);
-              for (let ci = valIdx + 1; ci < row.length; ci++) {
-                row[ci]._isTrailingEmpty = true;
-              }
-            });
-          });
-
-          // Also mark any row where only 1-3 cells have content and the rest are trailing empty
-          for (let ri = 0; ri < bodyRows.length; ri++) {
-            const row = bodyRows[ri];
-            let lastContentIdx = -1;
-            for (let ci = 0; ci < row.length; ci++) {
-              if ((row[ci].content || '').trim() !== '') {
-                lastContentIdx = ci;
-              }
-            }
-            const nonEmptyCount = row.filter(c => (c.content || '').trim() !== '').length;
-            if (nonEmptyCount >= 1 && nonEmptyCount <= 3 && lastContentIdx < row.length - 1) {
-              for (let ci = lastContentIdx + 1; ci < row.length; ci++) {
-                row[ci]._isTrailingEmpty = true;
               }
             }
           }
@@ -926,13 +796,6 @@
             },
             didParseCell: function (data) {
               const raw = data.cell.raw;
-
-              // Trailing empty cells in summary / short rows: completely invisible (no border, clean page)
-              if (raw && raw._isTrailingEmpty) {
-                data.cell.styles.lineWidth = 0;
-                data.cell.styles.fillColor = [255, 255, 255];
-                return;
-              }
 
               // Guarantee visible, crisp, unbroken borders on all cells
               data.cell.styles.lineWidth = 0.18;

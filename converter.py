@@ -415,24 +415,10 @@ def _convert_via_com(
                     except Exception:
                         pass
 
-                    # Detect if sheet has multiple pages (e.g. 4 pages in 1 sheet, wide columns, or explicit page breaks)
-                    has_multi_page = (v_breaks_count > 0 or h_breaks_count > 0 or pages_count > 1 or col_count > 10)
-
-                    if has_multi_page:
-                        # PRESERVE AND RESPECT EXCEL PAGE BREAKS:
-                        # Do NOT force FitToPagesWide = 1 (which would squish all 4 pages into 1)!
-                        # Instead, keep 100% Zoom (or file's zoom) and let Excel naturally separate the pages cleanly!
-                        if isinstance(orig_zoom, int) and 20 <= orig_zoom <= 200:
-                            ps.Zoom = orig_zoom
-                        else:
-                            ps.Zoom = 100
-                        ps.FitToPagesWide = False
-                        ps.FitToPagesTall = False
-                    else:
-                        # Compact single-page table: fit width so it doesn't overflow slightly
-                        ps.Zoom = False
-                        ps.FitToPagesWide = 1
-                        ps.FitToPagesTall = False
+                    # SMART FIT: Always fit all columns across 1 page width (never slice columns horizontally)
+                    ps.Zoom = False
+                    ps.FitToPagesWide = 1
+                    ps.FitToPagesTall = False
 
                 elif fit_mode == "fit_width":
                     ps.Zoom = False
@@ -944,7 +930,13 @@ def _render_section_to_story(
     # Dynamic font size based on column count
     font_size = 7.5
     leading = 9.5
-    if max_cols > 15:
+    if max_cols > 30:
+        font_size = 4.0
+        leading = 5.0
+    elif max_cols > 20:
+        font_size = 4.8
+        leading = 6.0
+    elif max_cols > 15:
         font_size = 5.5
         leading = 7.0
     elif max_cols > 10:
@@ -988,16 +980,17 @@ def _render_section_to_story(
     }
     col_types = [detect_col_type(header_row[c] if c < len(header_row) else "") for c in range(max_cols)]
 
+    pad = 1.0 if max_cols > 30 else (1.5 if max_cols > 15 else 3.0)
     table_style_commands = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F1F5F9')),
         ('BOX', (0, 0), (-1, -1), 0.8, colors.HexColor('#475569')),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#94A3B8')),
         ('LINEBELOW', (0, 0), (-1, 0), 1.2, colors.HexColor('#334155')),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 3),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), pad),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), pad),
+        ('LEFTPADDING', (0, 0), (-1, -1), pad),
+        ('RIGHTPADDING', (0, 0), (-1, -1), pad),
     ]
 
     # Apply smart header colors
@@ -1151,28 +1144,22 @@ def _convert_via_reportlab_fallback(
             print(f"[Converter] Smart detection: Sheet '{ws.title}' -> {num_sections} logical pages detected", flush=True)
 
         for sec_idx, section_rows in enumerate(sections):
-            # Check if section needs horizontal column splitting (e.g. 35+ cols spanning 4 pages)
-            max_cols_per_page = 11 if final_orientation == "landscape" else 8
-            col_chunks = _split_section_columns(section_rows, max_cols_per_page=max_cols_per_page)
-            has_col_splits = len(col_chunks) > 1
+            if not is_first_page:
+                story.append(PageBreak())
+            is_first_page = False
 
-            for chunk_idx, chunk_rows in enumerate(col_chunks):
-                if not is_first_page:
-                    story.append(PageBreak())
-                is_first_page = False
+            show_sheet_title = (len(sheets) > 1 and sec_idx == 0)
 
-                show_sheet_title = (len(sheets) > 1 and sec_idx == 0 and chunk_idx == 0)
-
-                _render_section_to_story(
-                    section_rows=chunk_rows,
-                    story=story,
-                    styles=styles,
-                    sheet_idx=sheet_idx,
-                    section_idx=f"{sec_idx}_{chunk_idx}",
-                    available_width=available_width,
-                    sheet_title=ws.title if show_sheet_title else "",
-                    is_multi_section=is_multi_section or has_col_splits
-                )
+            _render_section_to_story(
+                section_rows=section_rows,
+                story=story,
+                styles=styles,
+                sheet_idx=sheet_idx,
+                section_idx=sec_idx,
+                available_width=available_width,
+                sheet_title=ws.title if show_sheet_title else "",
+                is_multi_section=is_multi_section
+            )
 
     doc.build(story)
     wb.close()
