@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     preset: 'normal',
     orientation: 'portrait',
     paperSize: 'A4',
-    fitMode: 'fit_width',
+    fitMode: 'auto',
     convertedTask: null,
     currentPage: 1,
     zoomLevel: 100, // percentage
@@ -484,16 +484,27 @@ document.addEventListener('DOMContentLoaded', () => {
         convertBtn.disabled = false;
         convertHintText.textContent = 'Siap dikonversi dengan pengaturan margin Anda';
 
-        // AUTO-LANDSCAPE: detect wide tables and auto-switch orientation
+        // AUTO-LANDSCAPE & MULTI-PAGE SMART DETECTION:
         if (data.details && data.details.length > 0) {
-          const maxCol = Math.max(...data.details.map(d => d.max_column || 0));
-          if (maxCol > 7 && state.orientation !== 'landscape') {
+          const maxCol = data.max_columns || Math.max(...data.details.map(d => d.max_column || 0));
+          const hasMulti = data.has_multipage || maxCol > 9;
+          const estPages = Math.max(...data.details.map(d => d.estimated_pages || 1));
+
+          if (data.suggested_orientation === 'landscape' && state.orientation !== 'landscape') {
+            setOrientation('landscape');
+          }
+
+          if (hasMulti && estPages > 1) {
+            showToast(`✨ Terdeteksi dokumen multi-halaman (~${estPages} halaman / ${maxCol} kolom). Mode Cerdas aktif: lembar akan otomatis dipisahkan rapi!`, 'info');
+          } else if (maxCol > 7 && state.orientation !== 'landscape') {
             setOrientation('landscape');
             showToast(`Tabel memiliki ${maxCol} kolom. Orientasi otomatis diatur ke Landscape untuk hasil cetak optimal.`, 'info');
+          } else {
+            showToast(`File "${file.name}" berhasil dimuat!`, 'success');
           }
+        } else {
+          showToast(`File "${file.name}" berhasil dimuat!`, 'success');
         }
-
-        showToast(`File "${file.name}" berhasil dimuat!`, 'success');
       } else {
         inspectFileLocally(file);
       }
@@ -942,11 +953,13 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadPdfBtn.setAttribute('download', data.filename);
     openTabPdfBtn.href = data.view_url || '#';
 
-    // Robust download click handling
+    // Robust download click handling for all devices (Android Tablet, Phone, Desktop, APK)
     downloadPdfBtn.onclick = (e) => {
+      e.preventDefault();
       if (state.lastPdfBlob && window.OfflineConverter) {
-        e.preventDefault();
         window.OfflineConverter.deliverPdf(state.lastPdfBlob, data.filename);
+      } else if (data.download_url && data.download_url !== '#') {
+        window.location.href = data.download_url;
       }
     };
 

@@ -1148,7 +1148,7 @@ def _convert_via_reportlab_fallback(
         is_multi_section = num_sections > 1
 
         if is_multi_section:
-            print(f"[Converter] Smart detection: Sheet '{ws.title}' → {num_sections} logical pages detected", flush=True)
+            print(f"[Converter] Smart detection: Sheet '{ws.title}' -> {num_sections} logical pages detected", flush=True)
 
         for sec_idx, section_rows in enumerate(sections):
             # Check if section needs horizontal column splitting (e.g. 35+ cols spanning 4 pages)

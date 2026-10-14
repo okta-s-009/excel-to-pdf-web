@@ -318,12 +318,16 @@
               <label for="fitMode" class="form-label"><i class="fa-solid fa-arrows-to-eye"></i> Penskalaan (Fit):</label>
               <div class="select-wrapper">
                 <select id="fitMode" class="custom-select">
-                  <option value="fit_width" selected>Muat Kolom (1 Hlm Lebar)</option>
-                  <option value="fit_page">Muat 1 Lembar Penuh</option>
-                  <option value="original">Ukuran Asli (100%)</option>
+                  <option value="auto" selected>✨ Cerdas / Otomatis (Pisahkan Lembar Sesuai Excel)</option>
+                  <option value="fit_width">Muat Kolom (Paksa 1 Hlm Lebar)</option>
+                  <option value="fit_page">Muat 1 Lembar Penuh (1 Hlm x 1 Hlm)</option>
+                  <option value="original">Ukuran Asli (100% Zoom)</option>
                 </select>
                 <i class="fa-solid fa-chevron-down select-chevron"></i>
               </div>
+              <p class="field-hint-text" style="font-size: 0.72rem; color: #0284c7; margin-top: 4px; line-height: 1.3;">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> <b>Cerdas:</b> Membaca Page Break di Excel & memisahkan halaman otomatis agar rapi.
+              </p>
             </div>
           </div>
 

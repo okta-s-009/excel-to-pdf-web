@@ -49,38 +49,62 @@ public class AndroidBridge {
 
             // Android 10+ (API 29+): Use MediaStore Downloads collection
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContentResolver resolver = activity.getContentResolver();
-                ContentValues contentValues = new ContentValues();
-                contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, safeName);
-                contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf");
-                contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Excel2PDF");
+                try {
+                    ContentResolver resolver = activity.getContentResolver();
+                    ContentValues contentValues = new ContentValues();
+                    contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, safeName);
+                    contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf");
+                    contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Excel2PDF");
 
-                Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues);
-                if (uri != null) {
-                    try (OutputStream os = resolver.openOutputStream(uri)) {
-                        if (os != null) {
-                            os.write(pdfBytes);
-                            saved = true;
+                    Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues);
+                    if (uri != null) {
+                        try (OutputStream os = resolver.openOutputStream(uri)) {
+                            if (os != null) {
+                                os.write(pdfBytes);
+                                saved = true;
+                            }
                         }
                     }
-                }
-            } else {
-                // Older Android: Direct file write to external Downloads directory
-                File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                File targetDir = new File(downloadsDir, "Excel2PDF");
-                if (!targetDir.exists()) {
-                    targetDir.mkdirs();
-                }
-                File targetFile = new File(targetDir, safeName);
-                try (FileOutputStream fos = new FileOutputStream(targetFile)) {
-                    fos.write(pdfBytes);
-                    saved = true;
+                } catch (Exception e) {
+                    saved = false;
                 }
             }
 
+            // Fallback for older Android or if MediaStore insert was unsuccessful
+            if (!saved) {
+                try {
+                    File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                    if (downloadsDir != null && (downloadsDir.exists() || downloadsDir.mkdirs())) {
+                        File targetDir = new File(downloadsDir, "Excel2PDF");
+                        if (!targetDir.exists()) {
+                            targetDir.mkdirs();
+                        }
+                        File targetFile = new File(targetDir, safeName);
+                        try (FileOutputStream fos = new FileOutputStream(targetFile)) {
+                            fos.write(pdfBytes);
+                            saved = true;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // Secondary fallback: Save to app-specific external files dir
+            if (!saved) {
+                try {
+                    File extDir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                    if (extDir != null) {
+                        File targetFile = new File(extDir, safeName);
+                        try (FileOutputStream fos = new FileOutputStream(targetFile)) {
+                            fos.write(pdfBytes);
+                            saved = true;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
             final String alertMsg = saved 
-                ? "PDF berhasil disimpan di folder Download: " + safeName 
-                : "Gagal menyimpan PDF.";
+                ? "PDF berhasil disimpan: " + safeName 
+                : "Gagal menyimpan PDF langsung ke Download. Coba gunakan tombol 'Bagikan' untuk menyimpan.";
             
             mainHandler.post(() -> Toast.makeText(activity, alertMsg, Toast.LENGTH_LONG).show());
 

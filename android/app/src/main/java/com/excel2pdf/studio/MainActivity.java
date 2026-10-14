@@ -74,6 +74,23 @@ public class MainActivity extends AppCompatActivity {
         // Attach native Java bridge for save/share
         webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
 
+        // DownloadListener captures any PDF or file download from WebView
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            try {
+                if (url != null && url.startsWith("data:")) {
+                    int commaIdx = url.indexOf(",");
+                    if (commaIdx != -1) {
+                        String base64 = url.substring(commaIdx + 1);
+                        new AndroidBridge(MainActivity.this).savePdf(base64, "dokumen.pdf");
+                    }
+                } else if (url != null && (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("blob:"))) {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                }
+            } catch (Exception ignored) {}
+        });
+
         // WebChromeClient handles file picker (<input type="file">) and progress
         webView.setWebChromeClient(new WebChromeClient() {
             @Override

@@ -953,11 +953,13 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadPdfBtn.setAttribute('download', data.filename);
     openTabPdfBtn.href = data.view_url || '#';
 
-    // Robust download click handling
+    // Robust download click handling for all devices (Android Tablet, Phone, Desktop, APK)
     downloadPdfBtn.onclick = (e) => {
+      e.preventDefault();
       if (state.lastPdfBlob && window.OfflineConverter) {
-        e.preventDefault();
         window.OfflineConverter.deliverPdf(state.lastPdfBlob, data.filename);
+      } else if (data.download_url && data.download_url !== '#') {
+        window.location.href = data.download_url;
       }
     };
 
