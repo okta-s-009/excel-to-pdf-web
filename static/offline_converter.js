@@ -1,17 +1,18 @@
 /**
- * Excel2PDF Studio - Offline Client-Side Conversion Engine v4.0
+ * Excel2PDF Studio - Offline Client-Side Conversion Engine v5.0
  * ============================================================
- * High-performance, pixel-accurate Excel-to-PDF conversion running
- * 100% in the browser (and inside Android APK) using SheetJS + jsPDF + AutoTable.
+ * Ultra-high-fidelity Excel-to-PDF conversion running 100% in the
+ * browser and Android APK (SheetJS + jsPDF + AutoTable).
  *
- * Specially engineered for wide government / contractor spreadsheets (e.g. RAB):
- *   - Auto-detects and extracts document title blocks above tables
- *   - Accurately maps SheetJS merged cells (colSpan & rowSpan)
- *   - Automatic multi-level header recognition
- *   - Auto-landscape switching for wide spreadsheets (>7 columns)
- *   - Dynamic scale-to-fit: fits all columns cleanly across page width
- *   - Number & currency right-alignment, index centering
- *   - Razor-sharp vector output with selectable text & pagination
+ * Engineered for Indonesian Accounting, Contractor, & Government Spreadsheets:
+ *   - Smart table boundary detection: eliminates ghost columns & stray scratch notes
+ *   - Smart semantic column coloring: peach dates, mint income, rose expenses, sky quantities
+ *   - 100% preservation of Excel explicit fill colors (e.g. bright yellow highlights)
+ *   - Solid, continuous, crisp grid lines on every cell (never faint or broken)
+ *   - Multi-tier header auto-merging: columns without subheaders merge cleanly vertically
+ *   - Clean date formatting (no long GMT timezone strings)
+ *   - Intelligent multi-table and multi-sheet separation
+ *   - Robust Android tablet & phone PDF download & share delivery
  */
 
 (function (window) {
@@ -49,13 +50,31 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
-  const SMART_COL_PALETTE = {
-    total: { head: [187, 247, 208], body: [220, 252, 231], text: [20, 83, 45] },    // Mint green (#DCFCE7)
-    harga: { head: [253, 230, 138], body: [254, 243, 199], text: [113, 63, 18] },   // Amber yellow (#FEF3C7)
-    jumlah: { head: [254, 215, 170], body: [255, 237, 213], text: [124, 45, 18] },  // Warm peach (#FFEDD5)
-    potongan: { head: [254, 205, 211], body: [254, 226, 226], text: [136, 19, 55] },// Rose red (#FEE2E2)
-    neutral: { head: [226, 232, 240], body: [241, 245, 249], text: [30, 41, 59] }    // Slate neutral (#F1F5F9)
+  // --- SMART SEMANTIC COLUMN PALETTE ---
+  const PALETTE = {
+    tanggal:    { headBg: [254, 215, 170], headText: [124, 45, 18],  bodyBg: [255, 247, 237], halign: 'center' }, // Soft Peach
+    keterangan: { headBg: [226, 232, 240], headText: [15, 23, 42],   bodyBg: [255, 255, 255], halign: 'left' },   // Clean Slate
+    quantity:   { headBg: [224, 242, 254], headText: [7, 89, 133],   bodyBg: [248, 250, 252], halign: 'center' }, // Sky Blue
+    masuk:      { headBg: [187, 247, 208], headText: [20, 83, 45],   bodyBg: [240, 253, 244], halign: 'right' },  // Mint Green
+    keluar:     { headBg: [254, 205, 211], headText: [159, 18, 57],  bodyBg: [255, 245, 245], halign: 'right' },  // Soft Rose
+    harga:      { headBg: [254, 240, 138], headText: [113, 63, 18],  bodyBg: [254, 252, 232], halign: 'right' },  // Honey Gold
+    total:      { headBg: [224, 231, 255], headText: [49, 46, 129],  bodyBg: [238, 242, 255], halign: 'right' },  // Soft Indigo
+    nomor:      { headBg: [226, 232, 240], headText: [15, 23, 42],   bodyBg: [248, 250, 252], halign: 'center' }, // Slate
+    default:    { headBg: [226, 232, 240], headText: [15, 23, 42],   bodyBg: [255, 255, 255], halign: 'left' }    // Slate / White
   };
+
+  function detectSemanticColType(headerText, subHeaderText) {
+    const combined = ((headerText || '') + ' ' + (subHeaderText || '')).toLowerCase().trim();
+    if (/\b(tanggal|tgl|date|waktu|hari)\b/.test(combined)) return 'tanggal';
+    if (/\b(masuk|debit|penerimaan|setoran|uang masuk)\b/.test(combined)) return 'masuk';
+    if (/\b(keluar|kredit|pengeluaran|biaya|belanja|bayar|potongan|kasbon)\b/.test(combined)) return 'keluar';
+    if (/\b(total|sub\s*total|subtotal|grand\s*total|sisa\s*saldo|saldo)\b/.test(combined)) return 'total';
+    if (/\b(harga|tarif|price|rate|cost|upah)\b/.test(combined)) return 'harga';
+    if (/\b(quantity|kuantitas|volume|vol|satuan|sat|unit|qty|banyak)\b/.test(combined)) return 'quantity';
+    if (/\b(keterangan|uraian|nama|kegiatan|item|deskripsi|pekerjaan)\b/.test(combined)) return 'keterangan';
+    if (/^(no|no\.|nomor|kode)$/.test(combined.trim())) return 'nomor';
+    return 'default';
+  }
 
   // Standard Excel theme colors (Theme 0..9)
   const EXCEL_THEME_PALETTE = [
@@ -64,7 +83,7 @@
     [231, 230, 230], // 2: Light 2 (Warm Gray)
     [68, 84, 106],   // 3: Dark 2 (Navy Slate)
     [68, 114, 196],  // 4: Accent 1 (Blue)
-    [237, 125, 49],  // 5: Accent 2 (Orange - prominent in Indonesian accounting)
+    [237, 125, 49],  // 5: Accent 2 (Orange)
     [165, 165, 165], // 6: Accent 3 (Gray)
     [255, 192, 0],   // 7: Accent 4 (Gold / Yellow)
     [91, 155, 213],  // 8: Accent 5 (Sky Blue)
@@ -128,21 +147,34 @@
     return null;
   }
 
-  function detectColType(text) {
-    if (!text) return null;
-    const t = String(text).trim().toLowerCase();
-    if (/\b(total|sub\s*total|subtotal|grand\s*total|total\s*harga|total\s*gaji|total\s*biaya|netto)\b/.test(t)) {
-      return 'total';
-    } else if (/\b(harga|tarif|price|rate|cost|upah)\b/.test(t)) {
-      return 'harga';
-    } else if (/\b(jumlah|volume|vol|qty|kuantitas|banyak)\b/.test(t)) {
-      return 'jumlah';
-    } else if (/\b(kasbon|potongan|minus|denda|pph|diskon|disc)\b/.test(t)) {
-      return 'potongan';
-    } else if (/\b(no|satuan|unit)\b/.test(t)) {
-      return 'neutral';
+  function formatDateValue(val, cell) {
+    if (cell && cell.w && !/GMT|Indochina|Western/i.test(cell.w)) {
+      return String(cell.w).trim();
     }
-    return null;
+    if (cell && (cell.t === 'd' || cell.v instanceof Date)) {
+      const d = cell.v instanceof Date ? cell.v : new Date(cell.v);
+      if (!isNaN(d.getTime())) {
+        const utcHours = d.getUTCHours();
+        let dCalc = d;
+        if (utcHours >= 12) {
+          dCalc = new Date(d.getTime() + 7 * 3600 * 1000);
+        }
+        const day = String(dCalc.getUTCDate()).padStart(2, '0');
+        const month = String(dCalc.getUTCMonth() + 1).padStart(2, '0');
+        const year = String(dCalc.getUTCFullYear()).slice(-2);
+        return `${day}/${month}/${year}`;
+      }
+    }
+    if (typeof val === 'string' && /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Za-z]+\s+\d{1,2}\s+\d{4}/i.test(val)) {
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) {
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = String(d.getFullYear()).slice(-2);
+        return `${day}/${month}/${year}`;
+      }
+    }
+    return val;
   }
 
   const OfflineConverter = {
@@ -196,7 +228,7 @@
     /**
      * Converts Excel workbook to PDF client-side.
      */
-    convertToPdf: async function (fileOrWorkbook, options) {
+    convertToPdf: async function (fileOrWorkbook, options = {}) {
       if (!this.isReady()) {
         throw new Error("Pustaka konversi offline belum siap (XLSX / jsPDF).");
       }
@@ -231,7 +263,6 @@
       let orientation = (options.orientation || 'portrait').toLowerCase();
       const paperSizeName = options.paper_size || 'A4';
       const paperDim = PAPER_DIMENSIONS_MM[paperSizeName] || PAPER_DIMENSIONS_MM.A4;
-      const showGridlines = options.show_gridlines !== false;
       const selectedSheet = options.sheet_name || 'all';
 
       // Sheets selection
@@ -239,19 +270,25 @@
       if (selectedSheet !== 'all' && workbook.Sheets[selectedSheet]) {
         sheetsToRender.push(selectedSheet);
       } else {
-        sheetsToRender = workbook.SheetNames || [];
+        // Skip sheets with no valid content (e.g. empty sheet '   ')
+        sheetsToRender = (workbook.SheetNames || []).filter(sn => {
+          const ws = workbook.Sheets[sn];
+          return ws && ws['!ref'];
+        });
       }
 
-      // Pre-scan all sheets to find global max REAL columns for auto-landscape
-      // Uses content density to ignore ghost empty columns from Excel formatting artifacts
+      if (sheetsToRender.length === 0) {
+        throw new Error("Tidak ada lembar kerja yang memiliki data.");
+      }
+
+      // Pre-scan sheets to find global max REAL columns for auto-landscape
       let globalMaxCols = 0;
       for (const sName of sheetsToRender) {
         const ws = workbook.Sheets[sName];
         if (!ws || !ws['!ref']) continue;
         const r0 = window.XLSX.utils.decode_range(ws['!ref']);
         const qDensity = {};
-        const scanEnd = Math.min(r0.e.r, r0.s.r + 60);
-        for (let qr = r0.s.r; qr <= scanEnd; qr++) {
+        for (let qr = r0.s.r; qr <= Math.min(r0.e.r, r0.s.r + 50); qr++) {
           for (let qc = r0.s.c; qc <= r0.e.c; qc++) {
             const addr = window.XLSX.utils.encode_cell({ r: qr, c: qc });
             const cell = ws[addr];
@@ -260,13 +297,8 @@
             }
           }
         }
-        let qStart = r0.s.c, qEnd = r0.s.c;
-        for (let qc = r0.s.c; qc <= r0.e.c; qc++) {
-          if ((qDensity[qc] || 0) >= 1 && qStart === r0.s.c) qStart = qc;
-          if ((qDensity[qc] || 0) >= 2) qEnd = qc;
-        }
-        const realCols = Math.max(qEnd - qStart + 1, 1);
-        if (realCols > globalMaxCols) globalMaxCols = realCols;
+        let realColCount = Object.keys(qDensity).length;
+        if (realColCount > globalMaxCols) globalMaxCols = realColCount;
       }
 
       // Auto-switch to landscape if user selected portrait but spreadsheet is wide (>7 cols)
@@ -303,10 +335,9 @@
 
         const range = window.XLSX.utils.decode_range(ws['!ref']);
         const totalRows = range.e.r - range.s.r + 1;
-        if (totalRows === 0) continue;
+        if (totalRows <= 0) continue;
 
-        // === SMART COLUMN BOUNDS: Eliminate ghost empty columns & stray scratch notes ===
-        // 1. Calculate row-by-row density of every column
+        // === SMART COLUMN BOUNDS: Eliminate ghost empty columns & isolated scratch notes ===
         const colDensity = {};
         for (let r = range.s.r; r <= range.e.r; r++) {
           for (let c = range.s.c; c <= range.e.c; c++) {
@@ -318,95 +349,48 @@
           }
         }
 
-        // 2. Identify merged ranges and header region
         const merges = ws['!merges'] || [];
         const mergedCols = new Set();
         for (const m of merges) {
-          for (let mc = m.s.c; mc <= m.e.c; mc++) {
-            mergedCols.add(mc);
-          }
+          for (let mc = m.s.c; mc <= m.e.c; mc++) mergedCols.add(mc);
         }
 
         let realStartCol = range.s.c;
-        let foundStart = false;
         for (let c = range.s.c; c <= range.e.c; c++) {
           if ((colDensity[c] || 0) > 0) {
             realStartCol = c;
-            foundStart = true;
             break;
           }
         }
 
-        // 3. Find real end column by detecting true continuous table extent
-        // Real table columns have continuous presence, headers, or substantial rows.
-        // A gap of 2 or more consecutive empty columns marks the end of the table.
+        const maxColDensity = Math.max(1, ...Object.values(colDensity));
         let realEndCol = realStartCol;
-        let emptyColGap = 0;
-
         for (let c = realStartCol; c <= range.e.c; c++) {
-          const density = colDensity[c] || 0;
+          const d = colDensity[c] || 0;
           const isMerged = mergedCols.has(c);
-
-          if (density > 0 || isMerged) {
-            // If we previously had a gap of 2+ empty columns and this column only has 1 or 2 stray cells:
-            // This is an isolated scratch note outside the table! Stop the table.
-            if (emptyColGap >= 2 && density <= 2 && !isMerged) {
+          if (d === 0 && !isMerged) {
+            // Check if subsequent columns are genuine table data or stray notes
+            let nextHasRealTable = false;
+            for (let nc = c + 1; nc <= Math.min(c + 3, range.e.c); nc++) {
+              if ((colDensity[nc] || 0) > maxColDensity * 0.15 || mergedCols.has(nc)) {
+                nextHasRealTable = true;
+                break;
+              }
+            }
+            if (!nextHasRealTable) break; // True table ended before this blank gap
+          } else if (d > 0 || isMerged) {
+            // If this column has tiny density (<8% of max) and is isolated far from start, stop table
+            if (d <= 4 && d < maxColDensity * 0.08 && !isMerged && c > realStartCol + 3) {
               break;
             }
             realEndCol = c;
-            emptyColGap = 0;
-          } else {
-            emptyColGap++;
-            if (emptyColGap >= 3) {
-              // 3 consecutive blank columns: definitely beyond the table
-              break;
-            }
           }
         }
 
         if (realEndCol < realStartCol) realEndCol = realStartCol;
         const totalCols = Math.max(realEndCol - realStartCol + 1, 1);
 
-        // === EXTRACT EXCEL CELL FILL COLORS ===
-        const excelFillColors = {};
-        for (let r = range.s.r; r <= range.e.r; r++) {
-          for (let c = realStartCol; c <= realEndCol; c++) {
-            const addr = window.XLSX.utils.encode_cell({ r, c });
-            const cell = ws[addr];
-            if (cell) {
-              const color = parseExcelCellColor(cell);
-              if (color) {
-                if (!excelFillColors[r]) excelFillColors[r] = {};
-                excelFillColors[r][c] = color;
-              }
-            }
-          }
-        }
-
-        // === PROPORTIONAL COLUMN WIDTHS from Excel metadata ===
-        const wsCols = ws['!cols'] || [];
-        const colWidthChars = [];
-        for (let c = realStartCol; c <= realEndCol; c++) {
-          const colInfo = wsCols[c];
-          if (colInfo && colInfo.wch) {
-            colWidthChars.push(Math.max(colInfo.wch, 3));
-          } else if (colInfo && colInfo.wpx) {
-            colWidthChars.push(Math.max(colInfo.wpx / 7, 3));
-          } else {
-            let maxLen = 4;
-            for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 30); r++) {
-              const addr = window.XLSX.utils.encode_cell({ r, c });
-              const cell = ws[addr];
-              if (cell) {
-                const v = cell.w !== undefined ? String(cell.w) : String(cell.v || '');
-                if (v.length > maxLen) maxLen = Math.min(v.length, 50);
-              }
-            }
-            colWidthChars.push(maxLen);
-          }
-        }
-
-        // 1. Build lookup of merged cells by absolute row (r) and col (c)
+        // Build merge map strictly within real bounds
         const mergeMap = {};
         for (const m of merges) {
           const rs = m.e.r - m.s.r + 1;
@@ -417,36 +401,44 @@
               if (r === m.s.r && c === m.s.c) {
                 mergeMap[r][c] = { rs, cs, origin: true };
               } else {
-                mergeMap[r][c] = { skip: true };
+                mergeMap[r][c] = { skip: true, originR: m.s.r, originC: m.s.c };
               }
             }
           }
         }
 
-        // 2. Separate Title rows from Table rows
-        // Title rows: early rows with <= 3 filled cells in wide sheets
+        // Separate Title rows from Table rows
         const titleLines = [];
         let tableStartR = range.s.r;
 
         for (let r = range.s.r; r <= range.e.r; r++) {
           const filled = [];
+          let isWideMerge = false;
+
           for (let c = realStartCol; c <= realEndCol; c++) {
+            const m = (mergeMap[r] && mergeMap[r][c]) || null;
+            if (m && m.origin && m.cs >= Math.floor(totalCols * 0.5)) {
+              isWideMerge = true;
+            }
+            if (m && m.skip) continue;
+
             const addr = window.XLSX.utils.encode_cell({ r, c });
             const cell = ws[addr];
-            if (cell && cell.w !== undefined && String(cell.w).trim() !== '') {
-              filled.push(String(cell.w).trim());
-            } else if (cell && cell.v !== undefined && String(cell.v).trim() !== '') {
-              filled.push(String(cell.v).trim());
+            if (cell && cell.v !== undefined && String(cell.v).trim() !== '') {
+              filled.push(String(cell.w || cell.v).trim());
             }
           }
 
           if (filled.length === 0) {
-            continue; // Skip blank spacing row
+            if (r < range.s.r + 8) continue;
+            tableStartR = r;
+            break;
           }
 
-          if (((filled.length === 1 && totalCols >= 2) || (filled.length <= 3 && totalCols > 4)) && r < range.s.r + 6) {
-            // SMART FILTER: Only accept genuine title text (at least 4 chars, not short noise like "an", "x", "ok")
+          const isTitleRow = (filled.length <= 2 && (isWideMerge || totalCols >= 4));
+          if (r < range.s.r + 8 && isTitleRow) {
             const titleStr = filled.join(' - ').trim();
+            // Filter out isolated stray 1-3 letter scratch notes (e.g. "an")
             if (titleStr.length >= 4 && !/^[a-zA-Z0-9\/\-\.]{1,3}$/.test(titleStr)) {
               titleLines.push(titleStr);
             }
@@ -456,208 +448,262 @@
           }
         }
 
-        // 3. Determine number of header rows (e.g. multi-tier headers)
+        // Determine header rows count (multi-tier headers)
         let headerRowsCount = 1;
         for (let c = realStartCol; c <= realEndCol; c++) {
-          const m = (mergeMap[tableStartR] && mergeMap[tableStartR][c]) || null;
-          if (m && m.origin && m.rs > headerRowsCount) {
-            headerRowsCount = m.rs;
+          const m = (mergeMap[tableStartR] && mergeMap[tableStartR][c]);
+          if (m && m.origin && m.rs > 1 && m.rs <= 4) {
+            if (m.rs > headerRowsCount) headerRowsCount = m.rs;
+          }
+          if (m && m.origin && m.cs > 1 && tableStartR + 1 <= range.e.r) {
+            headerRowsCount = Math.max(headerRowsCount, 2);
           }
         }
 
-        // 4. Construct table rows with colSpan and rowSpan, supporting multiple tables per sheet
+        // Heuristic: check if row below tableStartR contains subheader keywords
+        if (headerRowsCount === 1 && tableStartR + 1 <= range.e.r) {
+          let subScore = 0;
+          for (let c = realStartCol; c <= realEndCol; c++) {
+            const addr = window.XLSX.utils.encode_cell({ r: tableStartR + 1, c });
+            const cell = ws[addr];
+            if (cell && cell.v !== undefined) {
+              const v = String(cell.v).trim().toLowerCase();
+              if (/^(vol|volume|sat|satuan|unit|masuk|keluar|debit|kredit|jumlah|qty|harga|list)$/i.test(v)) {
+                subScore++;
+              }
+            }
+          }
+          if (subScore >= 2) headerRowsCount = 2;
+        }
+
+        // Multi-tier header auto-merging:
+        // When headerRowsCount === 2, columns in tableStartR that have no subheaders below
+        // should automatically merge vertically across both header rows!
+        if (headerRowsCount === 2) {
+          for (let c = realStartCol; c <= realEndCol; c++) {
+            const m1 = (mergeMap[tableStartR] && mergeMap[tableStartR][c]);
+            const nextR = tableStartR + 1;
+            const addr2 = window.XLSX.utils.encode_cell({ r: nextR, c });
+            const cell2 = ws[addr2];
+            const hasContentBelow = cell2 && cell2.v !== undefined && String(cell2.v).trim() !== '';
+
+            if (!m1 && !hasContentBelow) {
+              if (!mergeMap[tableStartR]) mergeMap[tableStartR] = {};
+              mergeMap[tableStartR][c] = { rs: 2, cs: 1, origin: true, autoHeaderMerge: true };
+              if (!mergeMap[nextR]) mergeMap[nextR] = {};
+              mergeMap[nextR][c] = { skip: true, originR: tableStartR, originC: c };
+            }
+          }
+        }
+
+        // Determine semantic column types for smart coloring
+        const colTypes = {};
+        for (let c = realStartCol; c <= realEndCol; c++) {
+          let h1 = '', h2 = '';
+          const c1 = ws[window.XLSX.utils.encode_cell({ r: tableStartR, c })];
+          if (c1 && c1.v !== undefined) h1 = String(c1.w || c1.v).trim();
+          if (headerRowsCount > 1) {
+            const c2 = ws[window.XLSX.utils.encode_cell({ r: tableStartR + 1, c })];
+            if (c2 && c2.v !== undefined) h2 = String(c2.w || c2.v).trim();
+          }
+          // If h1 is blank (merged from left), find origin text
+          if (!h1) {
+            for (let sc = c - 1; sc >= realStartCol; sc--) {
+              const oc = ws[window.XLSX.utils.encode_cell({ r: tableStartR, c: sc })];
+              if (oc && oc.v !== undefined && String(oc.w || oc.v).trim() !== '') {
+                h1 = String(oc.w || oc.v).trim();
+                break;
+              }
+            }
+          }
+          colTypes[c] = detectSemanticColType(h1, h2);
+        }
+
+        // Proportional column widths from Excel metadata
+        const wsCols = ws['!cols'] || [];
+        const colWidthChars = [];
+        for (let c = realStartCol; c <= realEndCol; c++) {
+          const colInfo = wsCols[c];
+          if (colInfo && colInfo.wch) {
+            colWidthChars.push(Math.max(colInfo.wch, 4));
+          } else if (colInfo && colInfo.wpx) {
+            colWidthChars.push(Math.max(colInfo.wpx / 7, 4));
+          } else {
+            let maxLen = 4;
+            for (let r = tableStartR; r <= Math.min(range.e.r, tableStartR + 35); r++) {
+              const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
+              if (cell) {
+                const v = String(cell.w || cell.v || '');
+                if (v.length > maxLen) maxLen = Math.min(v.length, 45);
+              }
+            }
+            colWidthChars.push(maxLen);
+          }
+        }
+
+        // Construct table rows with colSpan, rowSpan, and cell styling
         const tableSections = [];
         let currentSectionRows = [];
         let blankCount = 0;
 
         for (let r = tableStartR; r <= range.e.r; r++) {
-          const cells = [];
+          const isHeaderRow = (r < tableStartR + headerRowsCount);
+          const rowCells = [];
+          let rowHasContent = false;
+
           for (let c = realStartCol; c <= realEndCol; c++) {
             const m = (mergeMap[r] && mergeMap[r][c]) || null;
-            if (m && m.skip) {
-              continue; // Skip cell covered by a colSpan or rowSpan
-            }
+            if (m && m.skip) continue;
 
             const addr = window.XLSX.utils.encode_cell({ r, c });
             const cell = ws[addr];
             let val = '';
-            if (cell) {
-              val = cell.w !== undefined ? String(cell.w).trim() : (cell.v !== undefined ? String(cell.v).trim() : '');
+            if (cell && cell.v !== undefined) {
+              val = cell.w !== undefined ? String(cell.w).trim() : String(cell.v).trim();
+              val = formatDateValue(val, cell);
+              if (val) rowHasContent = true;
             }
 
-            // Detect cell text alignment
-            let halign = 'left';
-            if (cell && cell.t === 'n') {
-              halign = 'right';
-            } else if (/^[\(]?[\-]?\s*(Rp|IDR|\$|€|£)?\s*[\d.,]+\s*[\)]?$/.test(val) && /\d/.test(val)) {
-              halign = 'right';
-            } else if (/^[\d.,]+\s*%$/.test(val)) {
-              halign = 'right';
-            } else if (val.length <= 5 && /^\d+$/.test(val)) {
-              halign = 'center';
-            } else if (/^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test(val)) {
-              halign = 'center';
-            } else if (val.length <= 7 && /^(M3|Sak|Kg|Buah|Batang|Keping|Lembar|Unit|m'|m2|m3|Ltr|Pkt|Bln|Hari|Jam|Ls|Set)$/i.test(val)) {
-              halign = 'center';
+            const cType = colTypes[c] || 'default';
+            const pal = PALETTE[cType] || PALETTE.default;
+
+            let halign = pal.halign;
+            // Heuristic override for alignment if cell has specific format
+            if (!isHeaderRow && halign === 'left') {
+              if (cell && cell.t === 'n') halign = 'right';
+              else if (/^[\(]?[\-]?\s*(Rp|IDR|\$|€|£)?\s*[\d.,]+\s*[\)]?$/.test(val) && /\d/.test(val)) halign = 'right';
+              else if (val.length <= 5 && /^\d+$/.test(val)) halign = 'center';
             }
+            if (isHeaderRow) halign = 'center';
 
             const cellObj = {
               content: val,
-              styles: { halign: halign }
+              styles: {
+                halign: halign,
+                valign: 'middle'
+              },
+              _c: c,
+              _r: r,
+              _colType: cType
             };
 
-            // === PRESERVE EXCEL FILL COLORS ===
-            const rowColors = excelFillColors[r];
-            if (rowColors) {
-              const cellColor = rowColors[c];
-              if (cellColor) {
-                cellObj._excelFillColor = cellColor;
-              } else {
-                // Row-level fill: if majority of cells in this row are colored, apply to all
-                const rowColorCount = Object.keys(rowColors).length;
-                if (rowColorCount >= Math.floor(totalCols * 0.4)) {
-                  cellObj._excelFillColor = Object.values(rowColors)[0];
-                }
-              }
+            // Capture custom Excel cell background color
+            const customColor = parseExcelCellColor(cell);
+            if (customColor) {
+              cellObj._excelColor = customColor;
             }
 
             if (m && m.origin) {
-              if (m.rs > 1) cellObj.rowSpan = m.rs;
-              if (m.cs > 1) cellObj.colSpan = m.cs;
+              let rs = m.rs;
+              let cs = m.cs;
+              if (c + cs - 1 > realEndCol) cs = realEndCol - c + 1;
+              if (rs > 1) cellObj.rowSpan = rs;
+              if (cs > 1) cellObj.colSpan = cs;
             }
-            cells.push(cellObj);
+
+            rowCells.push(cellObj);
           }
 
-          const hasContent = cells.some(c => c.content !== '');
-          if (!hasContent) {
+          if (rowHasContent || isHeaderRow) {
+            blankCount = 0;
+            // Check if summary / total row
+            const isTotalRow = !isHeaderRow && rowCells.some(c => {
+              const txt = (c.content || '').toUpperCase();
+              return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|SISA SALDO|SALDO AKHIR)\b/.test(txt);
+            });
+            if (isTotalRow) {
+              rowCells.forEach(c => { c._isTotal = true; });
+            }
+            currentSectionRows.push(rowCells);
+          } else {
             blankCount++;
+            // Intelligent split: 2+ blank rows separate tables cleanly
             if (blankCount >= 2 && currentSectionRows.length >= 2) {
               tableSections.push(currentSectionRows);
               currentSectionRows = [];
             }
-          } else {
-            // Intelligent split: Check if this row is a new table title or header following a blank row
-            if (blankCount >= 1 && currentSectionRows.length >= 3) {
-              const filledInRow = cells.filter(c => c.content !== '');
-              const firstTxt = filledInRow.length > 0 ? filledInRow[0].content : '';
-              const isNewTitle = (filledInRow.length === 1 && firstTxt.length >= 5) ||
-                                 (filledInRow.length <= 3 && /^(LAPORAN|TABEL|REKAPITULASI|DAFTAR|SECTION|BAGIAN|HALAMAN|PAGE|KETERANGAN)\b/i.test(firstTxt));
-              const isNewHeader = filledInRow.some(c => /^(No|Kode|Tanggal|Nama|Keterangan|Uraian|Item)\b/i.test(c.content)) && filledInRow.length >= Math.min(3, totalCols);
-              if (isNewTitle || isNewHeader) {
-                tableSections.push(currentSectionRows);
-                currentSectionRows = [];
-              }
-            }
-            blankCount = 0;
-            const isTotalRow = cells.some(c => {
-              const txt = (c.content || '').toUpperCase();
-              return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|TERBILANG)\b/.test(txt);
-            });
-            if (isTotalRow) {
-              cells.forEach(c => {
-                c.styles = c.styles || {};
-                c.styles.fontStyle = 'bold';
-                c.styles.fillColor = [241, 245, 249];
-                c.styles.textColor = [15, 23, 42];
-              });
-            }
-            currentSectionRows.push(cells);
           }
         }
+
         if (currentSectionRows.length > 0) {
           tableSections.push(currentSectionRows);
         }
 
         if (tableSections.length === 0) continue;
 
+        // Render each table section
         for (let secIdx = 0; secIdx < tableSections.length; secIdx++) {
           const allTableRows = tableSections[secIdx];
           if (allTableRows.length === 0) continue;
 
-          // Add page for subsequent sheets or subsequent table sections
           if (!isFirstTable) {
             doc.addPage([pageWidth, pageHeight], orientation);
           }
           isFirstTable = false;
 
-          // 5. Render titles above table (for first section or if section has title)
+          // Render Document Title above Table
           let curY = Math.max(topMm, 8);
           if (secIdx === 0 && titleLines.length > 0) {
             for (let ti = 0; ti < titleLines.length; ti++) {
-              const titleFontSize = ti === 0 ? 10 : 8.5;
+              const titleFontSize = ti === 0 ? 11 : 9;
               doc.setFontSize(titleFontSize);
               doc.setTextColor(15, 23, 42);
-              doc.setFont('helvetica', ti === 0 ? 'bold' : 'normal');
-
+              doc.setFont('helvetica', 'bold');
               const centerX = leftMm + printableWidth / 2;
               doc.text(titleLines[ti], centerX, curY, {
                 align: 'center',
                 maxWidth: printableWidth - 4
               });
-              curY += titleFontSize * 0.45 + 2.5;
+              curY += titleFontSize * 0.45 + 3.0;
             }
-            curY += 1.5;
+            curY += 2.0;
           } else if (sheetsToRender.length > 1 || tableSections.length > 1) {
-            doc.setFontSize(9);
-            doc.setTextColor(51, 65, 85);
+            doc.setFontSize(10);
+            doc.setTextColor(30, 41, 59);
             doc.setFont('helvetica', 'bold');
-            const secLabel = tableSections.length > 1 ? `Sheet: ${sName} (Tabel ${secIdx + 1})` : `Sheet: ${sName}`;
+            const secLabel = tableSections.length > 1
+              ? `Sheet: ${sName} (Tabel ${secIdx + 1})`
+              : `Sheet: ${sName}`;
             doc.text(secLabel, leftMm, curY);
-            curY += 5;
+            curY += 6.0;
           }
 
-          // 6. Split header vs body rows
+          // Split header vs body
           const headPart = allTableRows.slice(0, headerRowsCount);
           const bodyPart = allTableRows.slice(headerRowsCount);
 
-          // Detect column types for smart column coloring
-          const detectedColTypes = [];
-          if (headPart.length > 0) {
-            const lastHeaderRow = headPart[headPart.length - 1];
-            for (let c = 0; c < lastHeaderRow.length; c++) {
-              const hText = (lastHeaderRow[c] && lastHeaderRow[c].content) || '';
-              detectedColTypes.push(detectColType(hText));
-            }
-          }
-
-          // 7. Dynamic font size & cell padding based on column count
-          const fitMode = options.fit_mode || 'auto';
-          const isAutoFit = fitMode === 'auto';
-          const useHorizontalBreak = isAutoFit && totalCols > 10;
-
-          let fontSize = 7;
+          // Font sizing & padding based on column count
+          let fontSize = 7.5;
           let cellPadding = 1.0;
-          if (useHorizontalBreak) {
-            fontSize = 7.5;
-            cellPadding = 1.0;
-          } else if (totalCols > 25) {
-            fontSize = 4.5;
-            cellPadding = 0.55;
-          } else if (totalCols > 16) {
-            fontSize = 5.5;
-            cellPadding = 0.75;
-          } else if (totalCols > 10) {
-            fontSize = 6.5;
-            cellPadding = 0.9;
-          } else if (totalCols <= 6) {
-            fontSize = 8.5;
-            cellPadding = 1.4;
-          }
+          if (totalCols > 18) { fontSize = 5.2; cellPadding = 0.5; }
+          else if (totalCols > 14) { fontSize = 6.0; cellPadding = 0.7; }
+          else if (totalCols > 10) { fontSize = 6.8; cellPadding = 0.8; }
+          else if (totalCols > 7) { fontSize = 7.5; cellPadding = 1.0; }
+          else if (totalCols <= 6) { fontSize = 8.5; cellPadding = 1.3; }
 
-          // 8. Calculate proportional column widths from Excel metadata
+          // Proportional column widths
           const columnStyles = {};
-          if (!useHorizontalBreak && colWidthChars.length > 0) {
+          if (colWidthChars.length > 0) {
             const totalCharW = colWidthChars.reduce((a, b) => a + b, 0);
             if (totalCharW > 0) {
+              let totalWidthMm = 0;
+              const widths = [];
               for (let ci = 0; ci < colWidthChars.length; ci++) {
                 const pct = colWidthChars[ci] / totalCharW;
-                columnStyles[ci] = { cellWidth: Math.max(pct * printableWidth, 8) };
+                const minColW = totalCols > 12 ? 4.5 : 6.0;
+                const w = Math.max(pct * printableWidth, minColW);
+                widths.push(w);
+                totalWidthMm += w;
+              }
+              const scaleFactor = printableWidth / totalWidthMm;
+              for (let ci = 0; ci < widths.length; ci++) {
+                columnStyles[ci] = { cellWidth: widths[ci] * scaleFactor };
               }
             }
           }
 
-          // 9. AutoTable invocation with smart styling
-          const autoTableConfig = {
+          // AutoTable invocation
+          doc.autoTable({
             startY: curY,
             head: headPart,
             body: bodyPart,
@@ -669,84 +715,77 @@
             },
             theme: 'grid',
             showHead: 'everyPage',
-            tableWidth: useHorizontalBreak ? 'wrap' : printableWidth,
+            tableWidth: printableWidth,
             columnStyles: Object.keys(columnStyles).length > 0 ? columnStyles : undefined,
             styles: {
               fontSize: fontSize,
               cellPadding: cellPadding,
-              lineWidth: 0.15,
+              lineWidth: 0.18,
               lineColor: [148, 163, 184],
               textColor: [30, 41, 59],
               overflow: 'linebreak',
               valign: 'middle',
-              font: 'helvetica'
+              font: 'helvetica',
+              minCellHeight: fontSize * 0.35 + cellPadding * 2
             },
             headStyles: {
-              fillColor: [241, 245, 249],
-              textColor: [15, 23, 42],
-              fontStyle: 'bold',
-              halign: 'center',
-              lineWidth: 0.2,
+              lineWidth: 0.25,
               lineColor: [100, 116, 139],
-              valign: 'middle'
-            },
-            alternateRowStyles: {
-              fillColor: [248, 250, 252]
+              fontStyle: 'bold',
+              valign: 'middle',
+              minCellHeight: fontSize * 0.35 + cellPadding * 2 + 1.5
             },
             didParseCell: function (data) {
-              // Guarantee visible crisp borders on all cells
-              data.cell.styles.lineWidth = 0.15;
+              // Guarantee visible, crisp, unbroken borders on all cells
+              data.cell.styles.lineWidth = 0.18;
               data.cell.styles.lineColor = [148, 163, 184];
 
-              // PRIORITY 1: Excel original fill color (highest priority)
-              const rawCell = data.cell.raw;
-              if (rawCell && rawCell._excelFillColor) {
-                data.cell.styles.fillColor = rawCell._excelFillColor;
-                const [fr, fg, fb] = rawCell._excelFillColor;
-                const luminance = (0.299 * fr + 0.587 * fg + 0.114 * fb);
-                data.cell.styles.textColor = luminance < 128 ? [255, 255, 255] : [15, 23, 42];
-                return; // Excel color takes full precedence
+              const raw = data.cell.raw;
+
+              // PRIORITY 1: Explicit custom fill color from Excel (e.g. bright yellow)
+              if (raw && raw._excelColor) {
+                data.cell.styles.fillColor = raw._excelColor;
+                const [fr, fg, fb] = raw._excelColor;
+                const lum = (0.299 * fr + 0.587 * fg + 0.114 * fb);
+                data.cell.styles.textColor = lum < 128 ? [255, 255, 255] : [15, 23, 42];
+                return;
               }
 
-              // PRIORITY 2: Smart column palette based on header keywords
-              const colIdx = data.column.index;
-              const cType = detectedColTypes[colIdx];
-              if (cType && SMART_COL_PALETTE[cType]) {
-                const pal = SMART_COL_PALETTE[cType];
-                if (data.section === 'head') {
-                  data.cell.styles.fillColor = pal.head;
-                  data.cell.styles.textColor = pal.text;
-                } else if (data.section === 'body') {
-                  const isTotal = data.row.raw && Array.isArray(data.row.raw) && data.row.raw.some(c => (c.styles && c.styles.fontStyle === 'bold'));
-                  if (!isTotal) {
-                    data.cell.styles.fillColor = pal.body;
-                    data.cell.styles.textColor = pal.text;
-                  }
-                }
+              // PRIORITY 2: Total / Summary Row
+              if (raw && raw._isTotal) {
+                data.cell.styles.fillColor = [224, 231, 255]; // Soft indigo/slate
+                data.cell.styles.textColor = [30, 27, 75];
+                data.cell.styles.fontStyle = 'bold';
+                return;
+              }
+
+              // PRIORITY 3: Smart semantic column palette
+              const cType = (raw && raw._colType) || 'default';
+              const pal = PALETTE[cType] || PALETTE.default;
+
+              if (data.section === 'head') {
+                data.cell.styles.fillColor = pal.headBg;
+                data.cell.styles.textColor = pal.headText;
+                data.cell.styles.lineColor = [100, 116, 139];
+              } else if (data.section === 'body') {
+                data.cell.styles.fillColor = pal.bodyBg;
+                data.cell.styles.textColor = [15, 23, 42];
               }
             }
-          };
-
-          if (useHorizontalBreak) {
-            autoTableConfig.horizontalPageBreak = true;
-            autoTableConfig.horizontalPageBreakRepeat = [0, 1];
-            autoTableConfig.horizontalPageBreakBehaviour = 'afterAllRows';
-          }
-
-          doc.autoTable(autoTableConfig);
+          });
         }
       }
 
-      // 9. Add professional page numbers in the footer of every page
+      // Add clean page numbers in footer
       const totalPages = doc.internal.getNumberOfPages();
       for (let p = 1; p <= totalPages; p++) {
         doc.setPage(p);
-        doc.setFontSize(7);
-        doc.setTextColor(140, 150, 160);
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 116, 139);
         doc.setFont('helvetica', 'normal');
         const footerText = `Hal ${p} / ${totalPages}`;
-        const textWidth = doc.getTextWidth(footerText);
-        doc.text(footerText, pageWidth - rightMm - textWidth, pageHeight - Math.max(bottomMm / 2, 4));
+        const tw = doc.getTextWidth(footerText);
+        doc.text(footerText, pageWidth - rightMm - tw, pageHeight - 5);
       }
 
       // Finalize PDF
@@ -765,7 +804,7 @@
         pdf_size_formatted: formatBytes(pdfSize),
         total_pages: totalPages,
         duration_seconds: durationSeconds,
-        engine: "Client-Side Engine v4.0 (Smart Precision)",
+        engine: "Client-Side Engine v5.0 (Smart Precision)",
         auto_landscape: autoLandscapeTriggered
       };
     },
@@ -779,7 +818,6 @@
       }
 
       try {
-        // ALWAYS pass a cloned copy as Uint8Array so PDF.js Web Worker never detaches original ArrayBuffer
         const bufferCopy = pdfArrayBuffer.slice ? pdfArrayBuffer.slice(0) : new Uint8Array(pdfArrayBuffer).buffer.slice(0);
         const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(bufferCopy) });
         const pdf = await loadingTask.promise;
@@ -840,7 +878,7 @@
     },
 
     /**
-     * Saves or shares the PDF based on platform (Native Android APK vs Browser)
+     * Saves or shares the PDF based on platform (Native Android APK vs Mobile Tablet Browser vs Desktop)
      */
     deliverPdf: function (pdfBlob, filename) {
       const safeName = (filename && filename.trim()) ? filename : 'dokumen.pdf';
@@ -860,41 +898,20 @@
         return;
       }
 
-      // 2. Mobile Browser (Android Tablet, iPad, Mobile Phone)
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if (isMobile) {
-        try {
-          const file = new File([pdfBlob], safeName, { type: 'application/pdf' });
-          const url = URL.createObjectURL(file);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = url;
-          a.download = safeName;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
-          }, 200);
-          return;
-        } catch (e) {
-          console.warn("Mobile blob download trigger:", e);
-        }
-      }
-
-      // 3. Desktop / General Browser Download
+      // 2. Mobile Browser (Android Tablet, iPad, Mobile Phone) & Desktop
       try {
-        const url = URL.createObjectURL(pdfBlob);
+        const blobUrl = URL.createObjectURL(pdfBlob);
         const a = document.createElement('a');
         a.style.display = 'none';
-        a.href = url;
+        a.href = blobUrl;
         a.download = safeName;
+        a.target = '_blank';
         document.body.appendChild(a);
         a.click();
         setTimeout(() => {
           document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        }, 200);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        }, 300);
       } catch (err) {
         console.warn('Download fallback trigger:', err);
         const reader = new FileReader();
@@ -948,7 +965,7 @@
         }
       }
 
-      // 3. Fallback
+      // 3. Fallback to direct deliver
       this.deliverPdf(pdfBlob, safeName);
     }
   };

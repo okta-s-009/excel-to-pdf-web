@@ -955,12 +955,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Robust download click handling for all devices (Android Tablet, Phone, Desktop, APK)
     downloadPdfBtn.onclick = (e) => {
-      e.preventDefault();
+      if (window.AndroidBridge) {
+        e.preventDefault();
+        window.OfflineConverter.deliverPdf(state.lastPdfBlob, data.filename);
+        return;
+      }
       if (state.lastPdfBlob && window.OfflineConverter) {
+        e.preventDefault();
         window.OfflineConverter.deliverPdf(state.lastPdfBlob, data.filename);
       } else if (data.download_url && data.download_url !== '#') {
         window.location.href = data.download_url;
       }
+      showToast('Mengunduh ' + data.filename + '...', 'info');
     };
 
     // Robust open in new tab / open in PDF reader
