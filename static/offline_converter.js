@@ -364,27 +364,56 @@
         }
 
         const maxColDensity = Math.max(1, ...Object.values(colDensity));
+
+        // Header-like rows near the top (>= 3 text cells). A column carrying a real text
+        // label in one of these rows is a genuine table column even if its data is sparse.
+        const headerLikeRows = [];
+        for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 15); r++) {
+          let textCount = 0;
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
+            if (cell && cell.t === 's' && String(cell.v).trim().length >= 2) textCount++;
+          }
+          if (textCount >= 3) headerLikeRows.push(r);
+        }
+        const hasHeaderLabel = (c) => headerLikeRows.some(r => {
+          const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
+          return Boolean(cell && cell.t === 's' && /[a-zA-Z]{3,}/.test(String(cell.v)));
+        });
+        const isRealColumn = (c) => {
+          const d = colDensity[c] || 0;
+          return d > maxColDensity * 0.15 || mergedCols.has(c) || (d >= 2 && hasHeaderLabel(c));
+        };
+        const isScratchColumn = (c) => {
+          // Only a handful of tiny values (e.g. "1", "T", "an") with no header label
+          if ((colDensity[c] || 0) > 2 || mergedCols.has(c) || hasHeaderLabel(c)) return false;
+          for (let r = range.s.r; r <= range.e.r; r++) {
+            const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
+            if (cell && cell.v !== undefined && String(cell.v).trim().length > 3) return false;
+          }
+          return true;
+        };
+
         let realEndCol = realStartCol;
         for (let c = realStartCol; c <= range.e.c; c++) {
           const d = colDensity[c] || 0;
-          const isMerged = mergedCols.has(c);
-          if (d === 0 && !isMerged) {
-            // Check if subsequent columns are genuine table data or stray notes
+          if (d === 0 && !mergedCols.has(c)) {
+            // Blank gap: continue only if genuine table columns follow (otherwise stray notes)
             let nextHasRealTable = false;
             for (let nc = c + 1; nc <= Math.min(c + 3, range.e.c); nc++) {
-              if ((colDensity[nc] || 0) > maxColDensity * 0.15 || mergedCols.has(nc)) {
-                nextHasRealTable = true;
-                break;
-              }
+              if (isRealColumn(nc)) { nextHasRealTable = true; break; }
             }
-            if (!nextHasRealTable) break; // True table ended before this blank gap
-          } else if (d > 0 || isMerged) {
-            // If this column has tiny density (<8% of max) and is isolated far from start, stop table
-            if (d <= 4 && d < maxColDensity * 0.08 && !isMerged && c > realStartCol + 3) {
-              break;
-            }
+            if (!nextHasRealTable) break;
+          } else {
+            // Populated column directly attached to the table: ALWAYS keep it,
+            // even when sparse (e.g. "Adm", "Adm transfer", status columns).
             realEndCol = c;
           }
+        }
+        // Trim only a trailing scratch column glued to the table edge
+        while (realEndCol > realStartCol + 3 && isScratchColumn(realEndCol)) {
+          realEndCol--;
+          while (realEndCol > realStartCol && !(colDensity[realEndCol] || 0) && !mergedCols.has(realEndCol)) realEndCol--;
         }
 
         if (realEndCol < realStartCol) realEndCol = realStartCol;
@@ -476,6 +505,23 @@
           if (subScore >= 2) headerRowsCount = 2;
         }
 
+        // A vertical merge that starts in a lower header row but continues below the header
+        // means that row is really DATA (e.g. "batu split | 200 | m3" spanning several rows).
+        for (let hr = tableStartR + 1; hr < tableStartR + headerRowsCount; hr++) {
+          let spillsIntoBody = false;
+          for (let c = realStartCol; c <= realEndCol; c++) {
+            const m = mergeMap[hr] && mergeMap[hr][c];
+            if (m && m.origin && hr + m.rs - 1 >= tableStartR + headerRowsCount) {
+              spillsIntoBody = true;
+              break;
+            }
+          }
+          if (spillsIntoBody) {
+            headerRowsCount = hr - tableStartR;
+            break;
+          }
+        }
+
         // Multi-tier header auto-merging:
         // When headerRowsCount === 2, columns in tableStartR that have no subheaders below
         // should automatically merge vertically across both header rows!
@@ -483,15 +529,39 @@
           for (let c = realStartCol; c <= realEndCol; c++) {
             const m1 = (mergeMap[tableStartR] && mergeMap[tableStartR][c]);
             const nextR = tableStartR + 1;
+            const addr1 = window.XLSX.utils.encode_cell({ r: tableStartR, c });
             const addr2 = window.XLSX.utils.encode_cell({ r: nextR, c });
+            const cell1 = ws[addr1];
             const cell2 = ws[addr2];
-            const hasContentBelow = cell2 && cell2.v !== undefined && String(cell2.v).trim() !== '';
+            const hasContentAbove = Boolean(cell1 && cell1.v !== undefined && String(cell1.v).trim() !== '');
+            const hasContentBelow = Boolean(cell2 && cell2.v !== undefined && String(cell2.v).trim() !== '');
 
-            if (!m1 && !hasContentBelow) {
-              if (!mergeMap[tableStartR]) mergeMap[tableStartR] = {};
-              mergeMap[tableStartR][c] = { rs: 2, cs: 1, origin: true, autoHeaderMerge: true };
-              if (!mergeMap[nextR]) mergeMap[nextR] = {};
-              mergeMap[nextR][c] = { skip: true, originR: tableStartR, originC: c };
+            if (!m1) {
+              if (!hasContentAbove && hasContentBelow) {
+                // Orphaned subheader (e.g. C4 empty, C5 "KETERANGAN"): lift to row 1 & span both
+                ws[addr1] = { ...cell2 };
+                if (!mergeMap[tableStartR]) mergeMap[tableStartR] = {};
+                mergeMap[tableStartR][c] = { rs: 2, cs: 1, origin: true, autoHeaderMerge: true };
+                if (!mergeMap[nextR]) mergeMap[nextR] = {};
+                mergeMap[nextR][c] = { skip: true, originR: tableStartR, originC: c };
+              } else if (!hasContentBelow) {
+                // Top header has no subheader below: span both rows.
+                // If top header is also blank but column contains dates, auto-label "Tanggal"
+                if (!hasContentAbove) {
+                  let dateMatches = 0;
+                  for (let r = tableStartR + headerRowsCount; r <= Math.min(range.e.r, tableStartR + 35); r++) {
+                    const cl = ws[window.XLSX.utils.encode_cell({ r, c })];
+                    if (cl && (cl.t === 'd' || (cl.t === 'n' && cl.v >= 30000 && cl.v <= 60000))) dateMatches++;
+                  }
+                  if (dateMatches >= 3) {
+                    ws[addr1] = { t: 's', v: 'Tanggal', w: 'Tanggal' };
+                  }
+                }
+                if (!mergeMap[tableStartR]) mergeMap[tableStartR] = {};
+                mergeMap[tableStartR][c] = { rs: 2, cs: 1, origin: true, autoHeaderMerge: true };
+                if (!mergeMap[nextR]) mergeMap[nextR] = {};
+                mergeMap[nextR][c] = { skip: true, originR: tableStartR, originC: c };
+              }
             }
           }
         }
@@ -541,22 +611,65 @@
           }
         }
 
-        // Construct table rows with colSpan, rowSpan, and cell styling
-        const tableSections = [];
-        let currentSectionRows = [];
-        let blankCount = 0;
-
+        // ---- PASS 1: decide which rows are rendered and which block each belongs to ----
+        // Block 'H' = header rows, 'B0', 'B1', ... = body table sections (split by 2+ blank rows)
+        const rowHasData = (r) => {
+          for (let c = realStartCol; c <= realEndCol; c++) {
+            const m = mergeMap[r] && mergeMap[r][c];
+            if (m && m.skip) continue;
+            const cell = ws[window.XLSX.utils.encode_cell({ r, c })];
+            if (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== '') return true;
+          }
+          return false;
+        };
+        const rowBlock = {};
+        const bodyBlockIds = [];
+        let secCounter = 0;
+        let blankRun = 0;
+        let secRowCount = headerRowsCount;
         for (let r = tableStartR; r <= range.e.r; r++) {
-          const isHeaderRow = (r < tableStartR + headerRowsCount);
+          if (r < tableStartR + headerRowsCount) { rowBlock[r] = 'H'; continue; }
+          if (rowHasData(r)) {
+            if (blankRun >= 2 && secRowCount >= 2) { secCounter++; secRowCount = 0; }
+            blankRun = 0;
+            const blk = 'B' + secCounter;
+            if (!bodyBlockIds.includes(blk)) bodyBlockIds.push(blk);
+            rowBlock[r] = blk;
+            secRowCount++;
+          } else {
+            blankRun++;
+          }
+        }
+
+        // ---- PASS 2: build cells. RowSpans are clipped to rendered rows of the same block, and
+        // cells whose merge origin lives in another block are materialized, so every row keeps
+        // exactly the right number of columns (no shifted / lost columns). ----
+        const headRows = [];
+        const bodyBlocks = {};
+        const keptRows = Object.keys(rowBlock).map(Number).sort((a, b) => a - b);
+
+        for (const r of keptRows) {
+          const blk = rowBlock[r];
+          const isHeaderRow = blk === 'H';
           const rowCells = [];
           let rowHasContent = false;
 
           for (let c = realStartCol; c <= realEndCol; c++) {
             const m = (mergeMap[r] && mergeMap[r][c]) || null;
-            if (m && m.skip) continue;
+            let materialColSpan = 0;
+
+            if (m && m.skip) {
+              const oR = m.originR, oC = m.originC;
+              const originInfo = (mergeMap[oR] && mergeMap[oR][oC]) || { rs: 1, cs: 1 };
+              const originRendered = oC >= realStartCol && (oR === r || rowBlock[oR] === blk);
+              if (originRendered) continue; // covered by origin's rowSpan / colSpan
+              const firstVisibleC = Math.max(oC, realStartCol);
+              if (c !== firstVisibleC) continue; // covered by the materialized cell's colSpan
+              materialColSpan = Math.min(oC + originInfo.cs - 1, realEndCol) - c + 1;
+            }
 
             const addr = window.XLSX.utils.encode_cell({ r, c });
-            const cell = ws[addr];
+            const cell = materialColSpan ? null : ws[addr];
             let val = '';
             if (cell && cell.v !== undefined) {
               val = cell.w !== undefined ? String(cell.w).trim() : String(cell.v).trim();
@@ -593,8 +706,14 @@
               cellObj._excelColor = customColor;
             }
 
+            if (materialColSpan > 1) cellObj.colSpan = materialColSpan;
+
             if (m && m.origin) {
-              let rs = m.rs;
+              // Effective rowSpan = rendered rows of the SAME block inside the merge range
+              let rs = 0;
+              for (let r2 = r; r2 <= r + m.rs - 1; r2++) {
+                if (rowBlock[r2] === blk) rs++;
+              }
               let cs = m.cs;
               if (c + cs - 1 > realEndCol) cs = realEndCol - c + 1;
               if (rs > 1) cellObj.rowSpan = rs;
@@ -604,37 +723,58 @@
             rowCells.push(cellObj);
           }
 
-          if (rowHasContent || isHeaderRow) {
-            blankCount = 0;
-            // Check if summary / total row
-            const isTotalRow = !isHeaderRow && rowCells.some(c => {
-              const txt = (c.content || '').toUpperCase();
-              return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|SISA SALDO|SALDO AKHIR)\b/.test(txt);
-            });
-            if (isTotalRow) {
-              rowCells.forEach(c => { c._isTotal = true; });
-            }
-            currentSectionRows.push(rowCells);
+          // Check if summary / total row
+          const isTotalRow = !isHeaderRow && rowHasContent && rowCells.some(c => {
+            const txt = (c.content || '').toUpperCase();
+            return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|SISA SALDO|SALDO AKHIR)\b/.test(txt);
+          });
+          if (isTotalRow) {
+            rowCells.forEach(c => { c._isTotal = true; });
+          }
+
+          if (isHeaderRow) {
+            headRows.push(rowCells);
           } else {
-            blankCount++;
-            // Intelligent split: 2+ blank rows separate tables cleanly
-            if (blankCount >= 2 && currentSectionRows.length >= 2) {
-              tableSections.push(currentSectionRows);
-              currentSectionRows = [];
-            }
+            if (!bodyBlocks[blk]) bodyBlocks[blk] = [];
+            bodyBlocks[blk].push(rowCells);
           }
         }
 
-        if (currentSectionRows.length > 0) {
-          tableSections.push(currentSectionRows);
+        // Assemble sections: [{ head, body }]
+        const cloneRows = (rows) => rows.map(row => row.map(cl => ({ ...cl, styles: { ...cl.styles } })));
+        const tableSections = [];
+        if (bodyBlockIds.length === 0) {
+          if (headRows.length > 0) tableSections.push({ head: headRows, body: [] });
+        } else {
+          bodyBlockIds.forEach((blk, idx) => {
+            const body = bodyBlocks[blk] || [];
+            if (body.length === 0) return;
+            if (idx === 0) {
+              tableSections.push({ head: headRows, body });
+              return;
+            }
+            // Follow-on block: repeat the main header only if it spans most of the table width
+            // (e.g. totals under the same columns); small side tables get no foreign header.
+            let minC = Infinity, maxC = -Infinity;
+            body.forEach(row => row.forEach(cl => {
+              if (cl.content) {
+                minC = Math.min(minC, cl._c);
+                maxC = Math.max(maxC, cl._c + (cl.colSpan || 1) - 1);
+              }
+            }));
+            const spanCols = maxC >= minC ? (maxC - minC + 1) : 0;
+            const head = (headRows.length > 0 && spanCols >= totalCols * 0.5) ? cloneRows(headRows) : [];
+            tableSections.push({ head, body });
+          });
         }
 
         if (tableSections.length === 0) continue;
 
         // Render each table section
         for (let secIdx = 0; secIdx < tableSections.length; secIdx++) {
-          const allTableRows = tableSections[secIdx];
-          if (allTableRows.length === 0) continue;
+          const headPart = tableSections[secIdx].head;
+          const bodyPart = tableSections[secIdx].body;
+          if (headPart.length === 0 && bodyPart.length === 0) continue;
 
           if (!isFirstTable) {
             doc.addPage([pageWidth, pageHeight], orientation);
@@ -667,10 +807,6 @@
             doc.text(secLabel, leftMm, curY);
             curY += 6.0;
           }
-
-          // Split header vs body
-          const headPart = allTableRows.slice(0, headerRowsCount);
-          const bodyPart = allTableRows.slice(headerRowsCount);
 
           // Font sizing & padding based on column count
           let fontSize = 7.5;
