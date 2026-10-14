@@ -868,39 +868,15 @@
                   row.splice(valIdx + 1, newSpan - oldSpan);
                 } else if (newSpan < oldSpan) {
                   for (let k = 0; k < oldSpan - newSpan; k++) {
-                    row.splice(valIdx + 1, 0, { content: '', _isTrailingEmpty: true });
+                    row.splice(valIdx + 1, 0, { content: '' });
                   }
                 }
               }
 
               // Do NOT tint summary rows purple with _isTotal
               row.forEach(c => { c._isTotal = false; });
-
-              // Mark all trailing cells after the value cell as trailing empty (no borders, no bg)
-              const valCell = item.nonEmptyCells.length >= 2 ? item.nonEmptyCells[1] : item.nonEmptyCells[0];
-              const valIdx = row.indexOf(valCell);
-              for (let ci = valIdx + 1; ci < row.length; ci++) {
-                row[ci]._isTrailingEmpty = true;
-              }
             });
           });
-
-          // Also mark any row where only 1-3 cells have content and the rest are trailing empty
-          for (let ri = 0; ri < bodyRows.length; ri++) {
-            const row = bodyRows[ri];
-            let lastContentIdx = -1;
-            for (let ci = 0; ci < row.length; ci++) {
-              if ((row[ci].content || '').trim() !== '') {
-                lastContentIdx = ci;
-              }
-            }
-            const nonEmptyCount = row.filter(c => (c.content || '').trim() !== '').length;
-            if (nonEmptyCount >= 1 && nonEmptyCount <= 3 && lastContentIdx < row.length - 1) {
-              for (let ci = lastContentIdx + 1; ci < row.length; ci++) {
-                row[ci]._isTrailingEmpty = true;
-              }
-            }
-          }
 
           // AutoTable invocation
           doc.autoTable({
@@ -937,13 +913,6 @@
             },
             didParseCell: function (data) {
               const raw = data.cell.raw;
-
-              // Trailing empty cells in summary / short rows: completely invisible (no border, clean page)
-              if (raw && raw._isTrailingEmpty) {
-                data.cell.styles.lineWidth = 0;
-                data.cell.styles.fillColor = [255, 255, 255];
-                return;
-              }
 
               // Guarantee visible, crisp, unbroken borders on all cells
               data.cell.styles.lineWidth = 0.18;
