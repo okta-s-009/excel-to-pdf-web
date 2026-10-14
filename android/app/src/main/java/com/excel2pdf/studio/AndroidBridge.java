@@ -131,4 +131,43 @@ public class AndroidBridge {
             mainHandler.post(() -> Toast.makeText(activity, errMsg, Toast.LENGTH_SHORT).show());
         }
     }
+
+    @JavascriptInterface
+    public void openPdf(final String base64Data, final String filename) {
+        try {
+            byte[] pdfBytes = Base64.decode(base64Data, Base64.DEFAULT);
+            String safeName = (filename != null && !filename.isEmpty()) ? filename : "dokumen.pdf";
+            if (!safeName.toLowerCase().endsWith(".pdf")) {
+                safeName += ".pdf";
+            }
+
+            File cacheDir = new File(activity.getCacheDir(), "opened_pdfs");
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs();
+            }
+
+            File targetFile = new File(cacheDir, safeName);
+            try (FileOutputStream fos = new FileOutputStream(targetFile)) {
+                fos.write(pdfBytes);
+            }
+
+            Uri contentUri = FileProvider.getUriForFile(
+                activity,
+                activity.getPackageName() + ".fileprovider",
+                targetFile
+            );
+
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            viewIntent.setDataAndType(contentUri, "application/pdf");
+            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            Intent chooser = Intent.createChooser(viewIntent, "Buka PDF dengan...");
+            mainHandler.post(() -> activity.startActivity(chooser));
+
+        } catch (Exception e) {
+            final String errMsg = "Gagal membuka PDF: " + e.getMessage();
+            mainHandler.post(() -> Toast.makeText(activity, errMsg, Toast.LENGTH_SHORT).show());
+        }
+    }
 }

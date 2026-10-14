@@ -19,6 +19,23 @@ echo.
 echo [2/3] Memeriksa Java Development Kit (JDK)...
 where java >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
+    :: Periksa lokasi JDK / JBR umum secara otomatis
+    if exist "C:\Program Files\Android\Android Studio\jbr\bin\java.exe" (
+        set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
+        set "PATH=C:\Program Files\Android\Android Studio\jbr\bin;%PATH%"
+    ) else if exist "C:\Program Files\Microsoft\jdk-17\bin\java.exe" (
+        set "JAVA_HOME=C:\Program Files\Microsoft\jdk-17"
+        set "PATH=C:\Program Files\Microsoft\jdk-17\bin;%PATH%"
+    ) else if exist "C:\Program Files\Eclipse Adoptium\jdk-17\bin\java.exe" (
+        set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17"
+        set "PATH=C:\Program Files\Eclipse Adoptium\jdk-17\bin;%PATH%"
+    ) else if exist "C:\Program Files\Java\jdk-17\bin\java.exe" (
+        set "JAVA_HOME=C:\Program Files\Java\jdk-17"
+        set "PATH=C:\Program Files\Java\jdk-17\bin;%PATH%"
+    )
+)
+where java >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [!] PERINGATAN: Java / JDK belum terdeteksi di sistem PATH.
     echo.

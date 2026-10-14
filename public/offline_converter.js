@@ -1,5 +1,5 @@
 /**
- * Excel2PDF Studio - Offline Client-Side Conversion Engine v3.5
+ * Excel2PDF Studio - Offline Client-Side Conversion Engine v3.7
  * ============================================================
  * High-performance, pixel-accurate Excel-to-PDF conversion running
  * 100% in the browser (and inside Android APK) using SheetJS + jsPDF + AutoTable.
@@ -232,7 +232,7 @@
             continue; // Skip blank spacing row
           }
 
-          if (filled.length <= 3 && totalCols > 4 && r < range.s.r + 6) {
+          if (((filled.length === 1 && totalCols >= 2) || (filled.length <= 3 && totalCols > 4)) && r < range.s.r + 6) {
             titleLines.push(filled.join(' - '));
           } else {
             tableStartR = r;
@@ -270,11 +270,15 @@
             let halign = 'left';
             if (cell && cell.t === 'n') {
               halign = 'right';
-            } else if (/^[\d.,Rp\s\-]+$/.test(val) && /\d/.test(val) && !/[a-zA-Z]/.test(val.replace(/Rp/gi, ''))) {
+            } else if (/^[\(]?[\-]?\s*(Rp|IDR|\$|€|£)?\s*[\d.,]+\s*[\)]?$/.test(val) && /\d/.test(val)) {
               halign = 'right';
-            } else if (val.length <= 4 && /^\d+$/.test(val)) {
+            } else if (/^[\d.,]+\s*%$/.test(val)) {
+              halign = 'right';
+            } else if (val.length <= 5 && /^\d+$/.test(val)) {
               halign = 'center';
-            } else if (val.length <= 5 && /^(M3|Sak|Kg|Buah|Batang|Keping|Lembar|Unit|m'|m2|m3)$/i.test(val)) {
+            } else if (/^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test(val)) {
+              halign = 'center';
+            } else if (val.length <= 7 && /^(M3|Sak|Kg|Buah|Batang|Keping|Lembar|Unit|m'|m2|m3|Ltr|Pkt|Bln|Hari|Jam|Ls|Set)$/i.test(val)) {
               halign = 'center';
             }
 
@@ -291,6 +295,18 @@
           }
 
           if (cells.some(c => c.content !== '')) {
+            const isTotalRow = cells.some(c => {
+              const txt = (c.content || '').toUpperCase();
+              return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|TERBILANG)\b/.test(txt);
+            });
+            if (isTotalRow) {
+              cells.forEach(c => {
+                c.styles = c.styles || {};
+                c.styles.fontStyle = 'bold';
+                c.styles.fillColor = [241, 245, 249];
+                c.styles.textColor = [15, 23, 42];
+              });
+            }
             allTableRows.push(cells);
           }
         }
@@ -416,7 +432,7 @@
         pdf_size_formatted: formatBytes(pdfSize),
         total_pages: totalPages,
         duration_seconds: durationSeconds,
-        engine: "Client-Side Engine v3.5 (Precision AutoTable)",
+        engine: "Client-Side Engine v3.7 (Precision AutoTable)",
         auto_landscape: autoLandscapeTriggered
       };
     },

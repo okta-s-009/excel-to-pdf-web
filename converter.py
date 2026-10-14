@@ -480,7 +480,7 @@ def _convert_via_reportlab_fallback(
                 data_start_idx = ri + 1
                 continue
             longest = max((len(c) for c in filled), default=0)
-            if len(filled) <= 2 and longest > 15 and max_cols > 3:
+            if (len(filled) == 1 and max_cols >= 2) or (len(filled) <= 2 and longest > 15 and max_cols > 3):
                 title_lines.append(" ".join(filled))
                 data_start_idx = ri + 1
             else:
@@ -578,15 +578,6 @@ def _convert_via_reportlab_fallback(
         th_cells = [Paragraph(f"<b>{header_row[c]}</b>", th_style) for c in range(max_cols)]
         table_matrix.append(th_cells)
 
-        for r in body_rows:
-            row_cells = []
-            for c in range(max_cols):
-                val = r[c] if c < len(r) else ""
-                cell_p = Paragraph(val or "", td_styles[c])
-                row_cells.append(cell_p)
-            table_matrix.append(row_cells)
-
-        table = Table(table_matrix, colWidths=col_widths, repeatRows=1)
         table_style_commands = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F1F5F9')),
             ('LINEBELOW', (0, 0), (-1, 0), 1.0, colors.HexColor('#94A3B8')),
@@ -597,10 +588,29 @@ def _convert_via_reportlab_fallback(
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]
-        for ri in range(1, len(table_matrix)):
-            bg = colors.HexColor('#F8FAFC') if ri % 2 == 1 else colors.white
-            table_style_commands.append(('BACKGROUND', (0, ri), (-1, ri), bg))
 
+        for ri, r in enumerate(body_rows):
+            row_cells = []
+            is_total_row = any(re.search(r'\b(total|jumlah|sub\s*total|grand\s*total)\b', c, re.I) for c in r)
+            for c in range(max_cols):
+                val = r[c] if c < len(r) else ""
+                if is_total_row and val:
+                    cell_p = Paragraph(f"<b>{val}</b>", td_styles[c])
+                else:
+                    cell_p = Paragraph(val or "", td_styles[c])
+                row_cells.append(cell_p)
+            table_matrix.append(row_cells)
+
+            matrix_row_idx = ri + 1
+            if is_total_row:
+                table_style_commands.append(('BACKGROUND', (0, matrix_row_idx), (-1, matrix_row_idx), colors.HexColor('#F1F5F9')))
+                table_style_commands.append(('LINEABOVE', (0, matrix_row_idx), (-1, matrix_row_idx), 0.8, colors.HexColor('#94A3B8')))
+                table_style_commands.append(('LINEBELOW', (0, matrix_row_idx), (-1, matrix_row_idx), 1.2, colors.HexColor('#334155')))
+            else:
+                bg = colors.HexColor('#F8FAFC') if matrix_row_idx % 2 == 1 else colors.white
+                table_style_commands.append(('BACKGROUND', (0, matrix_row_idx), (-1, matrix_row_idx), bg))
+
+        table = Table(table_matrix, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle(table_style_commands))
         story.append(table)
         story.append(Spacer(1, 15))
