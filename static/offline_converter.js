@@ -771,44 +771,75 @@
         if (tableSections.length === 0) continue;
 
         // Render each table section
+        // Count total rows across sections in this sheet for smart 1-page fitting
+        let totalSheetRows = 0;
+        tableSections.forEach(sec => {
+          totalSheetRows += (sec.head.length + sec.body.length);
+        });
+
+        // Determine if sheet should fit on 1 page:
+        // 1) Explicit 'fit_page' setting, OR
+        // 2) Compact sheet (<= 45 rows) in 'auto' mode
+        const fitMode = (options.fit_mode || 'auto').toLowerCase();
+        const shouldFitOnePage = (fitMode === 'fit_page' && totalSheetRows <= 75) ||
+                                 (fitMode === 'auto' && totalSheetRows <= 45);
+
         for (let secIdx = 0; secIdx < tableSections.length; secIdx++) {
           const headPart = tableSections[secIdx].head;
           const bodyPart = tableSections[secIdx].body;
           if (headPart.length === 0 && bodyPart.length === 0) continue;
 
-          if (!isFirstTable) {
-            doc.addPage([pageWidth, pageHeight], orientation);
-          }
-          isFirstTable = false;
+          let startY = Math.max(topMm, 8);
 
-          // Render Document Title above Table
-          let curY = Math.max(topMm, 8);
-          if (secIdx === 0 && titleLines.length > 0) {
-            for (let ti = 0; ti < titleLines.length; ti++) {
-              const titleFontSize = ti === 0 ? 11 : 9;
-              doc.setFontSize(titleFontSize);
-              doc.setTextColor(15, 23, 42);
-              doc.setFont('helvetica', 'bold');
-              const centerX = leftMm + printableWidth / 2;
-              doc.text(titleLines[ti], centerX, curY, {
-                align: 'center',
-                maxWidth: printableWidth - 4
-              });
-              curY += titleFontSize * 0.45 + 3.0;
+          if (secIdx === 0) {
+            // New sheet start: only add a page if this is not the very first sheet
+            if (!isFirstTable) {
+              doc.addPage([pageWidth, pageHeight], orientation);
             }
-            curY += 2.0;
-          } else if (sheetsToRender.length > 1 || tableSections.length > 1) {
-            doc.setFontSize(10);
-            doc.setTextColor(30, 41, 59);
-            doc.setFont('helvetica', 'bold');
-            const secLabel = tableSections.length > 1
-              ? `Sheet: ${sName} (Tabel ${secIdx + 1})`
-              : `Sheet: ${sName}`;
-            doc.text(secLabel, leftMm, curY);
-            curY += 6.0;
+            isFirstTable = false;
+
+            // Render Document Title above Table
+            let curY = Math.max(topMm, 8);
+            if (titleLines.length > 0) {
+              for (let ti = 0; ti < titleLines.length; ti++) {
+                const titleFontSize = ti === 0 ? 11 : 9;
+                doc.setFontSize(titleFontSize);
+                doc.setTextColor(15, 23, 42);
+                doc.setFont('helvetica', 'bold');
+                const centerX = leftMm + printableWidth / 2;
+                doc.text(titleLines[ti], centerX, curY, {
+                  align: 'center',
+                  maxWidth: printableWidth - 4
+                });
+                curY += titleFontSize * 0.45 + 3.0;
+              }
+              curY += 2.0;
+            } else if (sheetsToRender.length > 1) {
+              doc.setFontSize(10);
+              doc.setTextColor(30, 41, 59);
+              doc.setFont('helvetica', 'bold');
+              doc.text(`Sheet: ${sName}`, leftMm, curY);
+              curY += 6.0;
+            }
+            startY = curY;
+          } else {
+            // Subsequent section of the SAME sheet: keep on the same page!
+            const prevBottom = doc.lastAutoTable ? doc.lastAutoTable.finalY : startY;
+            const estRowH = 5.5;
+            const estSectionH = (headPart.length + bodyPart.length) * estRowH + 6;
+            const spaceLeft = pageHeight - bottomMm - prevBottom;
+
+            if (spaceLeft >= Math.min(estSectionH, 20)) {
+              // Fits on the current page!
+              startY = prevBottom + 5.0;
+            } else {
+              // Truly overflows current page, start new page
+              doc.addPage([pageWidth, pageHeight], orientation);
+              startY = Math.max(topMm, 8);
+            }
           }
 
-          // Font sizing & padding based on column count
+          // Font sizing & padding based on column count and 1-page fit
           let fontSize = 7.5;
           let cellPadding = 1.0;
           if (totalCols > 18) { fontSize = 5.2; cellPadding = 0.5; }
@@ -816,6 +847,15 @@
           else if (totalCols > 10) { fontSize = 6.8; cellPadding = 0.8; }
           else if (totalCols > 7) { fontSize = 7.5; cellPadding = 1.0; }
           else if (totalCols <= 6) { fontSize = 8.5; cellPadding = 1.3; }
+
+          if (shouldFitOnePage && totalSheetRows > 0) {
+            const availHeightMm = pageHeight - topMm - bottomMm - (titleLines.length * 8) - 15;
+            const maxRowHeight = availHeightMm / totalSheetRows;
+            if (maxRowHeight < 7.0) {
+              fontSize = Math.max(5.2, Math.min(fontSize, maxRowHeight * 1.1));
+              cellPadding = Math.max(0.4, Math.min(cellPadding, (maxRowHeight - fontSize * 0.35) / 2.5));
+            }
+          }
 
           // Proportional column widths
           const columnStyles = {};
@@ -840,13 +880,13 @@
 
           // AutoTable invocation
           doc.autoTable({
-            startY: curY,
+            startY: startY,
             head: headPart,
             body: bodyPart,
             margin: {
               left: leftMm,
               right: rightMm,
-              top: curY,
+              top: Math.max(topMm, 8),
               bottom: bottomMm
             },
             theme: 'grid',
