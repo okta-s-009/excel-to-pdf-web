@@ -49,6 +49,31 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
+  const SMART_COL_PALETTE = {
+    total: { head: [187, 247, 208], body: [220, 252, 231], text: [20, 83, 45] },    // Mint green (#DCFCE7)
+    harga: { head: [253, 230, 138], body: [254, 243, 199], text: [113, 63, 18] },   // Amber yellow (#FEF3C7)
+    jumlah: { head: [254, 215, 170], body: [255, 237, 213], text: [124, 45, 18] },  // Warm peach (#FFEDD5)
+    potongan: { head: [254, 205, 211], body: [254, 226, 226], text: [136, 19, 55] },// Rose red (#FEE2E2)
+    neutral: { head: [226, 232, 240], body: [241, 245, 249], text: [30, 41, 59] }    // Slate neutral (#F1F5F9)
+  };
+
+  function detectColType(text) {
+    if (!text) return null;
+    const t = String(text).trim().toLowerCase();
+    if (/\b(total|sub\s*total|subtotal|grand\s*total|total\s*harga|total\s*gaji|total\s*biaya|netto)\b/.test(t)) {
+      return 'total';
+    } else if (/\b(harga|tarif|price|rate|cost|upah)\b/.test(t)) {
+      return 'harga';
+    } else if (/\b(jumlah|volume|vol|qty|kuantitas|banyak)\b/.test(t)) {
+      return 'jumlah';
+    } else if (/\b(kasbon|potongan|minus|denda|pph|diskon|disc)\b/.test(t)) {
+      return 'potongan';
+    } else if (/\b(no|satuan|unit)\b/.test(t)) {
+      return 'neutral';
+    }
+    return null;
+  }
+
   const OfflineConverter = {
     /**
      * Checks if all required offline libraries are loaded.
@@ -249,8 +274,11 @@
           }
         }
 
-        // 4. Construct table rows with colSpan and rowSpan
-        const allTableRows = [];
+        // 4. Construct table rows with colSpan and rowSpan, supporting multiple tables per sheet
+        const tableSections = [];
+        let currentSectionRows = [];
+        let blankCount = 0;
+
         for (let r = tableStartR; r <= range.e.r; r++) {
           const cells = [];
           for (let c = range.s.c; c <= range.e.c; c++) {
@@ -294,7 +322,15 @@
             cells.push(cellObj);
           }
 
-          if (cells.some(c => c.content !== '')) {
+          const hasContent = cells.some(c => c.content !== '');
+          if (!hasContent) {
+            blankCount++;
+            if (blankCount >= 2 && currentSectionRows.length >= 2) {
+              tableSections.push(currentSectionRows);
+              currentSectionRows = [];
+            }
+          } else {
+            blankCount = 0;
             const isTotalRow = cells.some(c => {
               const txt = (c.content || '').toUpperCase();
               return /\b(TOTAL|JUMLAH|SUBTOTAL|SUB TOTAL|GRAND TOTAL|TERBILANG)\b/.test(txt);
@@ -307,116 +343,156 @@
                 c.styles.textColor = [15, 23, 42];
               });
             }
-            allTableRows.push(cells);
+            currentSectionRows.push(cells);
           }
         }
-
-        if (allTableRows.length === 0) continue;
-
-        // Add page for subsequent sheets
-        if (!isFirstTable) {
-          doc.addPage([pageWidth, pageHeight], orientation);
+        if (currentSectionRows.length > 0) {
+          tableSections.push(currentSectionRows);
         }
-        isFirstTable = false;
 
-        // 5. Render titles above table
-        let curY = Math.max(topMm, 8);
-        if (titleLines.length > 0) {
-          for (let ti = 0; ti < titleLines.length; ti++) {
-            const titleFontSize = ti === 0 ? 10 : 8.5;
-            doc.setFontSize(titleFontSize);
-            doc.setTextColor(15, 23, 42);
-            doc.setFont('helvetica', ti === 0 ? 'bold' : 'normal');
+        if (tableSections.length === 0) continue;
 
-            const centerX = leftMm + printableWidth / 2;
-            doc.text(titleLines[ti], centerX, curY, {
-              align: 'center',
-              maxWidth: printableWidth - 4
-            });
-            curY += titleFontSize * 0.45 + 2.5;
+        for (let secIdx = 0; secIdx < tableSections.length; secIdx++) {
+          const allTableRows = tableSections[secIdx];
+          if (allTableRows.length === 0) continue;
+
+          // Add page for subsequent sheets or subsequent table sections
+          if (!isFirstTable) {
+            doc.addPage([pageWidth, pageHeight], orientation);
           }
-          curY += 1.5;
-        } else if (sheetsToRender.length > 1) {
-          doc.setFontSize(9);
-          doc.setTextColor(51, 65, 85);
-          doc.setFont('helvetica', 'bold');
-          doc.text(`Sheet: ${sName}`, leftMm, curY);
-          curY += 5;
-        }
+          isFirstTable = false;
 
-        // 6. Split header vs body rows
-        const headPart = allTableRows.slice(0, headerRowsCount);
-        const bodyPart = allTableRows.slice(headerRowsCount);
+          // 5. Render titles above table (for first section or if section has title)
+          let curY = Math.max(topMm, 8);
+          if (secIdx === 0 && titleLines.length > 0) {
+            for (let ti = 0; ti < titleLines.length; ti++) {
+              const titleFontSize = ti === 0 ? 10 : 8.5;
+              doc.setFontSize(titleFontSize);
+              doc.setTextColor(15, 23, 42);
+              doc.setFont('helvetica', ti === 0 ? 'bold' : 'normal');
 
-        // 7. Dynamic font size & cell padding based on column count
-        const fitMode = options.fit_mode || 'auto';
-        const isAutoFit = fitMode === 'auto';
-        const useHorizontalBreak = isAutoFit && totalCols > 10;
-
-        let fontSize = 7;
-        let cellPadding = 1.0;
-        if (useHorizontalBreak) {
-          fontSize = 7.5;
-          cellPadding = 1.0;
-        } else if (totalCols > 25) {
-          fontSize = 4.5;
-          cellPadding = 0.55;
-        } else if (totalCols > 16) {
-          fontSize = 5.5;
-          cellPadding = 0.75;
-        } else if (totalCols > 10) {
-          fontSize = 6.5;
-          cellPadding = 0.9;
-        } else if (totalCols <= 6) {
-          fontSize = 8.5;
-          cellPadding = 1.4;
-        }
-
-        // 8. AutoTable invocation
-        const autoTableConfig = {
-          startY: curY,
-          head: headPart,
-          body: bodyPart,
-          margin: {
-            left: leftMm,
-            right: rightMm,
-            top: curY,
-            bottom: bottomMm
-          },
-          theme: 'grid',
-          showHead: 'everyPage',
-          tableWidth: useHorizontalBreak ? 'wrap' : printableWidth,
-          styles: {
-            fontSize: fontSize,
-            cellPadding: cellPadding,
-            lineWidth: showGridlines ? 0.1 : 0.05,
-            lineColor: [203, 213, 225],
-            textColor: [30, 41, 59],
-            overflow: 'linebreak',
-            valign: 'middle',
-            font: 'helvetica'
-          },
-          headStyles: {
-            fillColor: [241, 245, 249],
-            textColor: [15, 23, 42],
-            fontStyle: 'bold',
-            halign: 'center',
-            lineWidth: 0.15,
-            lineColor: [148, 163, 184],
-            valign: 'middle'
-          },
-          alternateRowStyles: {
-            fillColor: [248, 250, 252]
+              const centerX = leftMm + printableWidth / 2;
+              doc.text(titleLines[ti], centerX, curY, {
+                align: 'center',
+                maxWidth: printableWidth - 4
+              });
+              curY += titleFontSize * 0.45 + 2.5;
+            }
+            curY += 1.5;
+          } else if (sheetsToRender.length > 1 || tableSections.length > 1) {
+            doc.setFontSize(9);
+            doc.setTextColor(51, 65, 85);
+            doc.setFont('helvetica', 'bold');
+            const secLabel = tableSections.length > 1 ? `Sheet: ${sName} (Tabel ${secIdx + 1})` : `Sheet: ${sName}`;
+            doc.text(secLabel, leftMm, curY);
+            curY += 5;
           }
-        };
 
-        if (useHorizontalBreak) {
-          autoTableConfig.horizontalPageBreak = true;
-          autoTableConfig.horizontalPageBreakRepeat = [0, 1];
-          autoTableConfig.horizontalPageBreakBehaviour = 'afterAllRows';
+          // 6. Split header vs body rows
+          const headPart = allTableRows.slice(0, headerRowsCount);
+          const bodyPart = allTableRows.slice(headerRowsCount);
+
+          // Detect column types for smart column coloring
+          const detectedColTypes = [];
+          if (headPart.length > 0) {
+            const lastHeaderRow = headPart[headPart.length - 1];
+            for (let c = 0; c < lastHeaderRow.length; c++) {
+              const hText = (lastHeaderRow[c] && lastHeaderRow[c].content) || '';
+              detectedColTypes.push(detectColType(hText));
+            }
+          }
+
+          // 7. Dynamic font size & cell padding based on column count
+          const fitMode = options.fit_mode || 'auto';
+          const isAutoFit = fitMode === 'auto';
+          const useHorizontalBreak = isAutoFit && totalCols > 10;
+
+          let fontSize = 7;
+          let cellPadding = 1.0;
+          if (useHorizontalBreak) {
+            fontSize = 7.5;
+            cellPadding = 1.0;
+          } else if (totalCols > 25) {
+            fontSize = 4.5;
+            cellPadding = 0.55;
+          } else if (totalCols > 16) {
+            fontSize = 5.5;
+            cellPadding = 0.75;
+          } else if (totalCols > 10) {
+            fontSize = 6.5;
+            cellPadding = 0.9;
+          } else if (totalCols <= 6) {
+            fontSize = 8.5;
+            cellPadding = 1.4;
+          }
+
+          // 8. AutoTable invocation
+          const autoTableConfig = {
+            startY: curY,
+            head: headPart,
+            body: bodyPart,
+            margin: {
+              left: leftMm,
+              right: rightMm,
+              top: curY,
+              bottom: bottomMm
+            },
+            theme: 'grid',
+            showHead: 'everyPage',
+            tableWidth: useHorizontalBreak ? 'wrap' : printableWidth,
+            styles: {
+              fontSize: fontSize,
+              cellPadding: cellPadding,
+              lineWidth: 0.15,
+              lineColor: [148, 163, 184],
+              textColor: [30, 41, 59],
+              overflow: 'linebreak',
+              valign: 'middle',
+              font: 'helvetica'
+            },
+            headStyles: {
+              fillColor: [241, 245, 249],
+              textColor: [15, 23, 42],
+              fontStyle: 'bold',
+              halign: 'center',
+              lineWidth: 0.2,
+              lineColor: [100, 116, 139],
+              valign: 'middle'
+            },
+            alternateRowStyles: {
+              fillColor: [248, 250, 252]
+            },
+            didParseCell: function (data) {
+              // Guarantee visible crisp borders on all cells so lines are never lost
+              data.cell.styles.lineWidth = 0.15;
+              data.cell.styles.lineColor = [148, 163, 184];
+
+              const colIdx = data.column.index;
+              const cType = detectedColTypes[colIdx];
+              if (cType && SMART_COL_PALETTE[cType]) {
+                const pal = SMART_COL_PALETTE[cType];
+                if (data.section === 'head') {
+                  data.cell.styles.fillColor = pal.head;
+                  data.cell.styles.textColor = pal.text;
+                } else if (data.section === 'body') {
+                  const isTotal = data.row.raw && Array.isArray(data.row.raw) && data.row.raw.some(c => (c.styles && c.styles.fontStyle === 'bold'));
+                  if (!isTotal) {
+                    data.cell.styles.fillColor = pal.body;
+                    data.cell.styles.textColor = pal.text;
+                  }
+                }
+              }
+            }
+          };
+
+          if (useHorizontalBreak) {
+            autoTableConfig.horizontalPageBreak = true;
+            autoTableConfig.horizontalPageBreakRepeat = [0, 1];
+            autoTableConfig.horizontalPageBreakBehaviour = 'afterAllRows';
+          }
+
+          doc.autoTable(autoTableConfig);
         }
-
-        doc.autoTable(autoTableConfig);
       }
 
       // 9. Add professional page numbers in the footer of every page

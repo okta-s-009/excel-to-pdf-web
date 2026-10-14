@@ -99,7 +99,7 @@ async def convert_file(
     center_horizontally: bool = Form(True),
     center_vertically: bool = Form(False),
     sheet_name: str = Form("all"),
-    show_gridlines: bool = Form(False),
+    show_gridlines: bool = Form(True),
     show_headings: bool = Form(False)
 ):
     """

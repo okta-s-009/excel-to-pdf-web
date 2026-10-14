@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import uuid
+import re
 try:
     import pymupdf
 except ImportError:
@@ -58,6 +59,29 @@ def points_to_cm(pt: float) -> float:
 
 def points_to_inch(pt: float) -> float:
     return float(pt) / 72.0
+
+
+def detect_col_type(text: str) -> Optional[str]:
+    """
+    Intelligently identifies the semantic type of a column based on its header text.
+    Returns: 'jumlah', 'harga', 'total', 'potongan', 'neutral', or None.
+    """
+    if not text:
+        return None
+    import re
+    t = str(text).strip().lower()
+    if re.search(r'\b(jumlah|grand\s*total|total\s*harga|total\s*gaji|total\s*biaya|netto)\b', t):
+        return 'jumlah'
+    elif re.search(r'\b(harga|tarif|price|rate|cost|upah)\b', t):
+        return 'harga'
+    elif re.search(r'\b(total|sub\s*total|subtotal)\b', t):
+        return 'total'
+    elif re.search(r'\b(kasbon|potongan|minus|denda|pph)\b', t):
+        return 'potongan'
+    elif re.search(r'\b(no|satuan|unit)\b', t):
+        return 'neutral'
+    return None
+
 
 
 def check_excel_availability() -> bool:
@@ -184,7 +208,7 @@ def convert_excel_to_pdf(
     center_horizontally: bool = True,
     center_vertically: bool = False,
     sheet_name: str = "all",
-    show_gridlines: bool = False,
+    show_gridlines: bool = True,
     show_headings: bool = False
 ) -> Dict[str, Any]:
     """
@@ -351,7 +375,9 @@ def _convert_via_com(
                 pass
 
             try:
-                ps.PrintGridlines = bool(show_gridlines)
+                ps.PrintGridlines = True if show_gridlines is None else bool(show_gridlines)
+                ps.BlackAndWhite = False
+                ps.Draft = False
                 ps.PrintHeadings = bool(show_headings)
             except Exception:
                 pass
@@ -431,6 +457,136 @@ def _convert_via_com(
                     ps.FitToPagesTall = False
             except Exception as e:
                 print(f"[Converter] Scaling setup error: {e}", file=sys.stderr)
+
+            # Smart formatting: enhance borders, separate tables, and apply smart column colors
+            try:
+                used_rng = ws.UsedRange
+                if used_rng:
+                    num_r = used_rng.Rows.Count
+                    num_c = used_rng.Columns.Count
+
+                    # 1. Detect all table blocks in the worksheet
+                    # Identify real table headers (filtering out total rows and summary lines)
+                    header_rows = []
+                    for r_idx in range(1, num_r + 1):
+                        text_cells = []
+                        num_cells = 0
+                        kw_count = 0
+                        first_text = None
+                        for c_idx in range(1, min(num_c + 1, 20)):
+                            v = ws.Cells(r_idx, c_idx).Value
+                            if v is None:
+                                continue
+                            v_str = str(v).strip()
+                            if not v_str:
+                                continue
+                            clean = re.sub(r'[Rp.,\s\-]', '', v_str)
+                            if clean.isdigit() and len(clean) > 3:
+                                num_cells += 1
+                            else:
+                                text_cells.append(v_str)
+                                if first_text is None:
+                                    first_text = v_str.lower()
+                                if detect_col_type(v_str):
+                                    kw_count += 1
+
+                        # Reject total/summary rows
+                        if first_text and re.search(r'\b(total|sub\s*total|subtotal|grand\s*total|terbilang|saldo)\b', first_text):
+                            continue
+                        # Reject data rows that are mostly numbers
+                        if num_cells > 0 and num_cells >= len(text_cells):
+                            continue
+                        if len(text_cells) >= 3 and kw_count >= 1:
+                            header_rows.append(r_idx)
+
+                    # If no keyword header found, fallback to first row with >= 2 cells
+                    if not header_rows:
+                        for r_idx in range(1, min(num_r + 1, 6)):
+                            filled_cnt = sum(1 for c_idx in range(1, min(num_c + 1, 15)) if ws.Cells(r_idx, c_idx).Value is not None and str(ws.Cells(r_idx, c_idx).Value).strip() != "")
+                            if filled_cnt >= 2:
+                                header_rows.append(r_idx)
+                                break
+
+                    if not header_rows:
+                        header_rows = [1]
+
+                    # Define table blocks: (header_r, end_r)
+                    table_blocks = []
+                    for h_idx, h_r in enumerate(header_rows):
+                        next_h = header_rows[h_idx + 1] if h_idx + 1 < len(header_rows) else num_r + 1
+                        # Find end row for this table (stop at 2 consecutive blank rows or before next header)
+                        t_end = h_r
+                        blank_run = 0
+                        for r_scan in range(h_r + 1, next_h):
+                            r_has_val = any(ws.Cells(r_scan, c).Value is not None and str(ws.Cells(r_scan, c).Value).strip() != "" for c in range(1, min(num_c + 1, 10)))
+                            if not r_has_val:
+                                blank_run += 1
+                                if blank_run >= 2:
+                                    break
+                            else:
+                                blank_run = 0
+                                t_end = r_scan
+                        table_blocks.append((h_r, max(t_end, h_r)))
+
+                    # 2. Smart vertical table separation:
+                    # Separate distinct tables onto new pages
+                    if fit_mode == "auto" and len(table_blocks) > 1:
+                        for b_idx in range(1, len(table_blocks)):
+                            curr_h = table_blocks[b_idx][0]
+                            # Check if there is a table title row above the header (e.g. curr_h - 1 or curr_h - 2)
+                            break_at = curr_h
+                            for t_above in range(curr_h - 1, max(table_blocks[b_idx - 1][1], curr_h - 3), -1):
+                                val_above = ws.Cells(t_above, 1).Value
+                                if val_above is not None and str(val_above).strip() != "":
+                                    break_at = t_above
+                                    break
+                            try:
+                                ws.HPageBreaks.Add(Before=ws.Rows(break_at))
+                            except Exception:
+                                pass
+
+                    COLOR_BGR_MAP = {
+                        'total': 0xE7FCDC,   # Soft Mint Green (#DCFCE7)
+                        'harga': 0xC7F3FE,   # Soft Amber Yellow (#FEF3C7)
+                        'jumlah': 0xD5EDFF,  # Soft Warm Peach (#FFEDD5)
+                        'potongan': 0xE2E2FE,# Soft Rose Red (#FEE2E2)
+                        'neutral': 0xF9F5F1  # Soft Slate Neutral (#F1F5F9)
+                    }
+
+                    # 3. Apply smart column colors and crisp borders for each table block
+                    for h_r, t_end in table_blocks:
+                        # Color columns within this table
+                        for c_idx in range(1, num_c + 1):
+                            head_val = ws.Cells(h_r, c_idx).Value
+                            col_type = detect_col_type(head_val)
+                            if col_type:
+                                tint_bgr = COLOR_BGR_MAP[col_type]
+                                for r_fill in range(h_r + 1, t_end + 1):
+                                    target_cell = ws.Cells(r_fill, c_idx)
+                                    try:
+                                        c_idx_val = target_cell.Interior.ColorIndex
+                                        c_col_val = target_cell.Interior.Color
+                                        # Only tint cells that do not already have a non-white custom fill
+                                        if c_idx_val == -4142 or c_col_val == 16777215:
+                                            target_cell.Interior.Color = tint_bgr
+                                    except Exception:
+                                        pass
+
+                        # Ensure crisp table borders for this table block
+                        try:
+                            tbl_rng = ws.Range(ws.Cells(h_r, 1), ws.Cells(t_end, num_c))
+                            for border_id in [7, 8, 9, 10, 11, 12]:
+                                try:
+                                    b = tbl_rng.Borders(border_id)
+                                    b.LineStyle = 1      # xlContinuous
+                                    b.Weight = 2         # xlThin
+                                    b.Color = 0xA0A0A0   # Slate Grey border
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"[Converter] Border and Table enhancement error: {e}", file=sys.stderr)
 
         if os.path.exists(output_pdf_path):
             os.remove(output_pdf_path)
@@ -822,16 +978,33 @@ def _render_section_to_story(
     th_cells = [Paragraph(f"<b>{header_row[c]}</b>", th_style) for c in range(max_cols)]
     table_matrix.append(th_cells)
 
+    # Smart column color detection
+    COL_PALETTE = {
+        'total': {'head': colors.HexColor('#BBF7D0'), 'body': colors.HexColor('#DCFCE7')},
+        'harga': {'head': colors.HexColor('#FDE68A'), 'body': colors.HexColor('#FEF3C7')},
+        'jumlah': {'head': colors.HexColor('#FED7AA'), 'body': colors.HexColor('#FFEDD5')},
+        'potongan': {'head': colors.HexColor('#FECDD3'), 'body': colors.HexColor('#FEE2E2')},
+        'neutral': {'head': colors.HexColor('#E2E8F0'), 'body': colors.HexColor('#F1F5F9')}
+    }
+    col_types = [detect_col_type(header_row[c] if c < len(header_row) else "") for c in range(max_cols)]
+
     table_style_commands = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F1F5F9')),
-        ('LINEBELOW', (0, 0), (-1, 0), 1.0, colors.HexColor('#94A3B8')),
-        ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#CBD5E1')),
+        ('BOX', (0, 0), (-1, -1), 0.8, colors.HexColor('#475569')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#94A3B8')),
+        ('LINEBELOW', (0, 0), (-1, 0), 1.2, colors.HexColor('#334155')),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 3),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
         ('LEFTPADDING', (0, 0), (-1, -1), 3),
         ('RIGHTPADDING', (0, 0), (-1, -1), 3),
     ]
+
+    # Apply smart header colors
+    for c in range(max_cols):
+        ctype = col_types[c]
+        if ctype and ctype in COL_PALETTE:
+            table_style_commands.append(('BACKGROUND', (c, 0), (c, 0), COL_PALETTE[ctype]['head']))
 
     for ri, r in enumerate(body_rows):
         row_cells = []
@@ -854,8 +1027,14 @@ def _render_section_to_story(
             table_style_commands.append(('LINEABOVE', (0, matrix_row_idx), (-1, matrix_row_idx), 0.8, colors.HexColor('#94A3B8')))
             table_style_commands.append(('LINEBELOW', (0, matrix_row_idx), (-1, matrix_row_idx), 1.2, colors.HexColor('#334155')))
         else:
+            # Base alternating row background
             bg = colors.HexColor('#F8FAFC') if matrix_row_idx % 2 == 1 else colors.white
             table_style_commands.append(('BACKGROUND', (0, matrix_row_idx), (-1, matrix_row_idx), bg))
+            # Overlay smart column color tints
+            for c in range(max_cols):
+                ctype = col_types[c]
+                if ctype and ctype in COL_PALETTE:
+                    table_style_commands.append(('BACKGROUND', (c, matrix_row_idx), (c, matrix_row_idx), COL_PALETTE[ctype]['body']))
 
     table = Table(table_matrix, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle(table_style_commands))
